@@ -5,12 +5,19 @@
 
 #include <QMainWindow>
 
+#include <QMap>
+#include <memory>
+
+class QCheckBox;
 class QComboBox;
+class QGraphicsEllipseItem;
+class QGraphicsLineItem;
 class QGraphicsScene;
 class QLabel;
 class QPushButton;
-class QTextEdit;
 class QSpinBox;
+class QTextEdit;
+class QTimer;
 
 class MainWindow final : public QMainWindow {
     Q_OBJECT
@@ -19,18 +26,41 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
 
 private slots:
-    void onGenerateAndSolve();
+    void onParseAndSolve();
+    void onNextStep();
+    void onToggleAutoPlay();
 
 private:
     void setupUi();
     QString mstToString(const MSTSolution& mst) const;
+    void drawGraph();
+    void renderCurrentStep();
+    void resetStepStyle();
+    QVector<int> selectedEdgesUntilStep(int stepIndex) const;
 
-    QSpinBox* m_vertexCount = nullptr;
-    QSpinBox* m_minWeight = nullptr;
-    QSpinBox* m_maxWeight = nullptr;
+    bool buildGraphFromInput(QString& error);
+    bool parseAdjMatrix(const QString& text, AdjMatrixGraph& graph, QString& error) const;
+    bool parseAdjList(const QString& text, AdjListGraph& graph, QString& error) const;
+
     QComboBox* m_storageType = nullptr;
-    QPushButton* m_runButton = nullptr;
+    QCheckBox* m_randomStart = nullptr;
+    QSpinBox* m_startVertex = nullptr;
+    QPushButton* m_solveButton = nullptr;
+    QPushButton* m_nextStepButton = nullptr;
+    QPushButton* m_playButton = nullptr;
+
+    QTextEdit* m_input = nullptr;
     QTextEdit* m_output = nullptr;
     QLabel* m_status = nullptr;
+    QLabel* m_stepInfo = nullptr;
     QGraphicsScene* m_scene = nullptr;
+    QTimer* m_timer = nullptr;
+
+    std::unique_ptr<IGraphStorage> m_graph;
+    QVector<MSTSolution> m_solutions;
+    int m_currentSolution = 0;
+    int m_currentStep = 0;
+
+    QMap<int, QGraphicsLineItem*> m_edgeItems;
+    QMap<int, QGraphicsEllipseItem*> m_vertexItems;
 };

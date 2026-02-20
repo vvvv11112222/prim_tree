@@ -1,17 +1,65 @@
 #include "mainwindow.h"
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QFormLayout>
+#include <QGraphicsEllipseItem>
+#include <QGraphicsLineItem>
 #include <QGraphicsScene>
+#include <QGraphicsSimpleTextItem>
 #include <QGraphicsView>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
 #include <QRandomGenerator>
+#include <QRegularExpression>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QTextEdit>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
+
+#include <QtMath>
+
+namespace {
+QString defaultMatrixInput() {
+    return "0 2 3 -1\n"
+           "2 0 1 4\n"
+           "3 1 0 5\n"
+           "-1 4 5 0";
+}
+
+QString defaultListInput() {
+    return "0 1 2\n"
+           "0 2 3\n"
+           "1 2 1\n"
+           "1 3 4\n"
+           "2 3 5";
+}
+
+bool parseWeightToken(const QString& token, int& value, bool& hasEdge) {
+    const QString t = token.trimmed().toUpper();
+    if (t == "INF" || t == "X" || t == "-1") {
+        hasEdge = false;
+        value = -1;
+        return true;
+    }
+    bool ok = false;
+    const int w = t.toInt(&ok);
+    if (!ok) {
+        return false;
+    }
+    if (w <= 0) {
+        hasEdge = false;
+        value = -1;
+        return true;
+    }
+    hasEdge = true;
+    value = w;
+    return true;
+}
+} // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setupUi();
@@ -26,38 +74,62 @@ void MainWindow::setupUi() {
     auto* leftLayout = new QVBoxLayout(left);
     auto* form = new QFormLayout();
 
-    m_vertexCount = new QSpinBox(left);
-    m_vertexCount->setRange(3, 30);
-    m_vertexCount->setValue(8);
-
-    m_minWeight = new QSpinBox(left);
-    m_minWeight->setRange(1, 99);
-    m_minWeight->setValue(1);
-
-    m_maxWeight = new QSpinBox(left);
-    m_maxWeight->setRange(1, 99);
-    m_maxWeight->setValue(9);
-
     m_storageType = new QComboBox(left);
     m_storageType->addItems({"邻接矩阵", "邻接表"});
 
-    m_runButton = new QPushButton("生成随机图并求所有MST", left);
-    connect(m_runButton, &QPushButton::clicked, this, &MainWindow::onGenerateAndSolve);
+    m_randomStart = new QCheckBox("随机起点", left);
+    m_randomStart->setChecked(true);
 
-    form->addRow("顶点数", m_vertexCount);
-    form->addRow("最小权", m_minWeight);
-    form->addRow("最大权", m_maxWeight);
-    form->addRow("存储结构", m_storageType);
+    m_startVertex = new QSpinBox(left);
+    m_startVertex->setRange(0, 0);
+    m_startVertex->setEnabled(false);
+
+    connect(m_randomStart, &QCheckBox::toggled, this, [this](bool checked) {
+        m_startVertex->setEnabled(!checked);
+    });
+
+    m_input = new QTextEdit(left);
+    m_input->setPlaceholderText("输入邻接矩阵或邻接表");
+    m_input->setPlainText(defaultMatrixInput());
+
+    connect(m_storageType,
+            qOverload<int>(&QComboBox::currentIndexChanged),
+            this,
+            [this](int idx) { m_input->setPlainText(idx == 0 ? defaultMatrixInput() : defaultListInput()); });
+
+    m_solveButton = new QPushButton("解析并求所有MST", left);
+    connect(m_solveButton, &QPushButton::clicked, this, &MainWindow::onParseAndSolve);
+
+    m_nextStepButton = new QPushButton("下一步", left);
+    m_nextStepButton->setEnabled(false);
+    connect(m_nextStepButton, &QPushButton::clicked, this, &MainWindow::onNextStep);
+
+    m_playButton = new QPushButton("自动播放", left);
+    m_playButton->setEnabled(false);
+    connect(m_playButton, &QPushButton::clicked, this, &MainWindow::onToggleAutoPlay);
+
+    auto* btnRow = new QHBoxLayout();
+    btnRow->addWidget(m_solveButton);
+    btnRow->addWidget(m_nextStepButton);
+    btnRow->addWidget(m_playButton);
+
+    form->addRow("输入格式", m_storageType);
+    form->addRow("起点模式", m_randomStart);
+    form->addRow("固定起点", m_startVertex);
 
     leftLayout->addLayout(form);
-    leftLayout->addWidget(m_runButton);
+    leftLayout->addWidget(new QLabel("图输入：", left));
+    leftLayout->addWidget(m_input);
+    leftLayout->addLayout(btnRow);
 
     m_status = new QLabel("就绪", left);
+    m_stepInfo = new QLabel("步骤：-", left);
     leftLayout->addWidget(m_status);
+    leftLayout->addWidget(m_stepInfo);
 
     m_scene = new QGraphicsScene(left);
     auto* graphView = new QGraphicsView(m_scene, left);
-    graphView->setMinimumSize(420, 320);
+    graphView->setMinimumSize(480, 360);
     leftLayout->addWidget(graphView);
 
     auto* right = new QWidget(splitter);
@@ -68,12 +140,153 @@ void MainWindow::setupUi() {
 
     splitter->addWidget(left);
     splitter->addWidget(right);
+    splitter->setStretchFactor(0, 1);
     splitter->setStretchFactor(1, 1);
 
     root->addWidget(splitter);
     setCentralWidget(central);
-    setWindowTitle("Prim 全部最小生成树演示");
-    resize(980, 620);
+
+    m_timer = new QTimer(this);
+    m_timer->setInterval(700);
+    connect(m_timer, &QTimer::timeout, this, [this]() {
+        if (m_currentSolution >= m_solutions.size()) {
+            m_timer->stop();
+            m_playButton->setText("自动播放");
+            return;
+        }
+        const auto& trace = m_solutions[m_currentSolution].trace;
+        if (m_currentStep >= trace.size()) {
+            m_timer->stop();
+            m_playButton->setText("自动播放");
+            return;
+        }
+        onNextStep();
+    });
+
+    setWindowTitle("Prim 所有最小生成树可视化");
+    resize(1180, 720);
+}
+
+bool MainWindow::parseAdjMatrix(const QString& text, AdjMatrixGraph& graph, QString& error) const {
+    const QStringList lines = text.split('\n', Qt::SkipEmptyParts);
+    if (lines.isEmpty()) {
+        error = "邻接矩阵输入为空";
+        return false;
+    }
+
+    QVector<QVector<int>> matrix;
+    for (const auto& rawLine : lines) {
+        const QString line = rawLine.trimmed();
+        if (line.isEmpty()) {
+            continue;
+        }
+        const QStringList tokens = line.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+        QVector<int> row;
+        for (const QString& token : tokens) {
+            int value = -1;
+            bool hasEdge = false;
+            if (!parseWeightToken(token, value, hasEdge)) {
+                error = QString("无法解析矩阵元素: %1").arg(token);
+                return false;
+            }
+            row.push_back(hasEdge ? value : -1);
+        }
+        matrix.push_back(row);
+    }
+
+    const int n = matrix.size();
+    for (const auto& row : matrix) {
+        if (row.size() != n) {
+            error = "邻接矩阵必须是 n x n";
+            return false;
+        }
+    }
+
+    graph.reset(n);
+    for (int i = 0; i < n; ++i) {
+        for (int j = i + 1; j < n; ++j) {
+            const int a = matrix[i][j];
+            const int b = matrix[j][i];
+            if (a != b) {
+                error = QString("矩阵不是对称矩阵: (%1,%2) 与 (%2,%1) 不一致").arg(i).arg(j);
+                return false;
+            }
+            if (a > 0) {
+                graph.addEdge(i, j, a);
+            }
+        }
+    }
+    return true;
+}
+
+bool MainWindow::parseAdjList(const QString& text, AdjListGraph& graph, QString& error) const {
+    const QStringList lines = text.split('\n', Qt::SkipEmptyParts);
+    if (lines.isEmpty()) {
+        error = "邻接表输入为空";
+        return false;
+    }
+
+    struct Row {
+        int u;
+        int v;
+        int w;
+    };
+
+    QVector<Row> rows;
+    int maxV = -1;
+
+    for (const auto& rawLine : lines) {
+        const QString line = rawLine.trimmed();
+        if (line.isEmpty()) {
+            continue;
+        }
+        const QStringList tokens = line.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+        if (tokens.size() != 3) {
+            error = QString("邻接表每行应为: u v w，错误行: %1").arg(line);
+            return false;
+        }
+
+        bool okU = false;
+        bool okV = false;
+        bool okW = false;
+        const int u = tokens[0].toInt(&okU);
+        const int v = tokens[1].toInt(&okV);
+        const int w = tokens[2].toInt(&okW);
+        if (!okU || !okV || !okW || u < 0 || v < 0 || w <= 0) {
+            error = QString("邻接表含非法值，错误行: %1").arg(line);
+            return false;
+        }
+        rows.push_back({u, v, w});
+        maxV = qMax(maxV, qMax(u, v));
+    }
+
+    if (maxV < 0) {
+        error = "邻接表未解析出有效边";
+        return false;
+    }
+
+    graph.reset(maxV + 1);
+    for (const auto& row : rows) {
+        graph.addEdge(row.u, row.v, row.w);
+    }
+    return true;
+}
+
+bool MainWindow::buildGraphFromInput(QString& error) {
+    if (m_storageType->currentIndex() == 0) {
+        auto graph = std::make_unique<AdjMatrixGraph>();
+        if (!parseAdjMatrix(m_input->toPlainText(), *graph, error)) {
+            return false;
+        }
+        m_graph = std::move(graph);
+    } else {
+        auto graph = std::make_unique<AdjListGraph>();
+        if (!parseAdjList(m_input->toPlainText(), *graph, error)) {
+            return false;
+        }
+        m_graph = std::move(graph);
+    }
+    return true;
 }
 
 QString MainWindow::mstToString(const MSTSolution& mst) const {
@@ -81,45 +294,208 @@ QString MainWindow::mstToString(const MSTSolution& mst) const {
     for (int id : mst.edgeIds) {
         edgeTexts << QString::number(id);
     }
-    return QString("cost=%1, edges=[%2]").arg(mst.totalCost).arg(edgeTexts.join(", "));
+    return QString("cost=%1, edgeIds=[%2]").arg(mst.totalCost).arg(edgeTexts.join(", "));
 }
 
-void MainWindow::onGenerateAndSolve() {
-    const int n = m_vertexCount->value();
-    const int minW = m_minWeight->value();
-    const int maxW = m_maxWeight->value();
-    if (minW > maxW) {
-        m_status->setText("参数错误：最小权不能大于最大权");
+void MainWindow::drawGraph() {
+    m_scene->clear();
+    m_edgeItems.clear();
+    m_vertexItems.clear();
+
+    if (!m_graph || m_graph->vertexCount() == 0) {
         return;
     }
 
-    const int start = QRandomGenerator::global()->bounded(n);
-    PrimAllMSTSolver solver;
+    const int n = m_graph->vertexCount();
+    const QPointF center(250, 190);
+    const double radius = qMin(150.0, 40.0 + n * 8.0);
 
+    QVector<QPointF> vertexPos(n);
+    for (int i = 0; i < n; ++i) {
+        const double angle = 2.0 * 3.14159265358979323846 * i / qMax(1, n);
+        vertexPos[i] = QPointF(center.x() + radius * qCos(angle), center.y() + radius * qSin(angle));
+    }
+
+    for (const auto& e : m_graph->edges()) {
+        const QPointF a = vertexPos[e.u];
+        const QPointF b = vertexPos[e.v];
+        auto* line = m_scene->addLine(QLineF(a, b), QPen(Qt::gray, 1.2));
+        m_edgeItems.insert(e.id, line);
+
+        const QPointF mid = (a + b) / 2.0;
+        auto* txt = m_scene->addSimpleText(QString::number(e.weight));
+        txt->setBrush(QBrush(Qt::darkBlue));
+        txt->setPos(mid.x() + 3, mid.y() + 3);
+    }
+
+    constexpr double r = 16.0;
+    for (int i = 0; i < n; ++i) {
+        const QPointF p = vertexPos[i];
+        auto* circle = m_scene->addEllipse(p.x() - r, p.y() - r, 2 * r, 2 * r, QPen(Qt::black), QBrush(Qt::white));
+        m_vertexItems.insert(i, circle);
+
+        auto* txt = m_scene->addSimpleText(QString::number(i));
+        txt->setPos(p.x() - 5, p.y() - 10);
+    }
+}
+
+void MainWindow::resetStepStyle() {
+    for (auto* item : m_edgeItems) {
+        item->setPen(QPen(Qt::gray, 1.2));
+    }
+    for (auto* item : m_vertexItems) {
+        item->setBrush(QBrush(Qt::white));
+    }
+}
+
+QVector<int> MainWindow::selectedEdgesUntilStep(int stepIndex) const {
+    QVector<int> selected;
+    if (m_currentSolution >= m_solutions.size()) {
+        return selected;
+    }
+    const auto& trace = m_solutions[m_currentSolution].trace;
+    for (int i = 0; i <= stepIndex && i < trace.size(); ++i) {
+        if (trace[i].type == PrimStep::Type::ChooseEdge && trace[i].chosenEdgeId >= 0) {
+            selected.push_back(trace[i].chosenEdgeId);
+        }
+        if (trace[i].type == PrimStep::Type::CompleteMST) {
+            selected = trace[i].relatedEdgeIds;
+        }
+    }
+    return selected;
+}
+
+void MainWindow::renderCurrentStep() {
+    if (m_currentSolution >= m_solutions.size()) {
+        return;
+    }
+
+    const auto& trace = m_solutions[m_currentSolution].trace;
+    if (m_currentStep < 0 || m_currentStep >= trace.size()) {
+        return;
+    }
+
+    resetStepStyle();
+    const PrimStep& step = trace[m_currentStep];
+
+    for (int v : step.verticesInTree) {
+        if (m_vertexItems.contains(v)) {
+            m_vertexItems[v]->setBrush(QBrush(QColor(202, 255, 191)));
+        }
+    }
+
+    for (int edgeId : selectedEdgesUntilStep(m_currentStep)) {
+        if (m_edgeItems.contains(edgeId)) {
+            m_edgeItems[edgeId]->setPen(QPen(QColor(24, 140, 60), 2.4));
+        }
+    }
+
+    if (step.type == PrimStep::Type::CandidateMinEdges) {
+        for (int edgeId : step.relatedEdgeIds) {
+            if (m_edgeItems.contains(edgeId)) {
+                m_edgeItems[edgeId]->setPen(QPen(QColor(227, 151, 48), 2.4));
+            }
+        }
+    }
+
+    if (step.chosenEdgeId >= 0 && m_edgeItems.contains(step.chosenEdgeId)) {
+        m_edgeItems[step.chosenEdgeId]->setPen(QPen(QColor(210, 35, 35), 3.2));
+    }
+
+    m_stepInfo->setText(
+        QString("步骤 %1/%2：%3（当前代价=%4）").arg(m_currentStep + 1).arg(trace.size()).arg(step.note).arg(step.currentCost));
+}
+
+void MainWindow::onParseAndSolve() {
+    QString error;
     m_output->clear();
-    m_scene->clear();
+    m_solutions.clear();
+    m_currentStep = 0;
+    m_currentSolution = 0;
+    if (m_timer->isActive()) {
+        m_timer->stop();
+        m_playButton->setText("自动播放");
+    }
 
-    QVector<MSTSolution> solutions;
-    if (m_storageType->currentIndex() == 0) {
-        auto g = GraphFactory::randomConnectedMatrixGraph(n, 0.4, minW, maxW);
-        solutions = solver.solveAll(g, start);
-        m_output->append(QString("使用邻接矩阵, 顶点=%1, 边=%2, 起点=%3")
-                             .arg(g.vertexCount())
-                             .arg(g.edgeCount())
-                             .arg(start));
+    if (!buildGraphFromInput(error)) {
+        m_scene->clear();
+        m_status->setText(QString("解析失败：%1").arg(error));
+        m_nextStepButton->setEnabled(false);
+        m_playButton->setEnabled(false);
+        return;
+    }
+
+    drawGraph();
+
+    const int n = m_graph->vertexCount();
+    m_startVertex->setRange(0, qMax(0, n - 1));
+    if (n == 0) {
+        m_status->setText("图为空");
+        m_nextStepButton->setEnabled(false);
+        m_playButton->setEnabled(false);
+        return;
+    }
+
+    const int start = m_randomStart->isChecked() ? QRandomGenerator::global()->bounded(n) : m_startVertex->value();
+
+    PrimAllMSTSolver solver;
+    m_solutions = solver.solveAll(*m_graph, start);
+
+    m_output->append(
+        QString("输入解析成功：顶点=%1, 边=%2, 起点=%3").arg(m_graph->vertexCount()).arg(m_graph->edgeCount()).arg(start));
+    m_output->append(QString("最小生成树数量: %1").arg(m_solutions.size()));
+
+    for (int i = 0; i < m_solutions.size(); ++i) {
+        m_output->append(QString("MST #%1 -> %2").arg(i + 1).arg(mstToString(m_solutions[i])));
+    }
+
+    if (m_solutions.isEmpty()) {
+        m_status->setText("未找到 MST（图可能不连通）");
+        m_nextStepButton->setEnabled(false);
+        m_playButton->setEnabled(false);
+        m_stepInfo->setText("步骤：-");
+        return;
+    }
+
+    m_status->setText("已求解，可点击“下一步”查看 Prim 过程");
+    m_nextStepButton->setEnabled(true);
+    m_playButton->setEnabled(true);
+    m_currentStep = 0;
+    renderCurrentStep();
+}
+
+void MainWindow::onNextStep() {
+    if (m_currentSolution >= m_solutions.size()) {
+        return;
+    }
+
+    const int traceSize = m_solutions[m_currentSolution].trace.size();
+    if (traceSize == 0) {
+        return;
+    }
+
+    renderCurrentStep();
+
+    if (m_currentStep < traceSize - 1) {
+        ++m_currentStep;
     } else {
-        auto g = GraphFactory::randomConnectedListGraph(n, 0.4, minW, maxW);
-        solutions = solver.solveAll(g, start);
-        m_output->append(QString("使用邻接表, 顶点=%1, 边=%2, 起点=%3")
-                             .arg(g.vertexCount())
-                             .arg(g.edgeCount())
-                             .arg(start));
+        if (m_timer->isActive()) {
+            m_timer->stop();
+            m_playButton->setText("自动播放");
+        }
+        m_status->setText("动画播放完成（当前展示第1棵 MST 的求解过程）");
     }
+}
 
-    m_output->append(QString("找到最小生成树数量: %1").arg(solutions.size()));
-    for (int i = 0; i < solutions.size(); ++i) {
-        m_output->append(QString("MST #%1 -> %2").arg(i + 1).arg(mstToString(solutions[i])));
+void MainWindow::onToggleAutoPlay() {
+    if (!m_playButton->isEnabled()) {
+        return;
     }
-
-    m_status->setText(QString("完成：起点 %1，MST 数 %2").arg(start).arg(solutions.size()));
+    if (m_timer->isActive()) {
+        m_timer->stop();
+        m_playButton->setText("自动播放");
+    } else {
+        m_timer->start();
+        m_playButton->setText("停止播放");
+    }
 }
