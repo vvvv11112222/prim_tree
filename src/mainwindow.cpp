@@ -22,6 +22,9 @@
 
 #include <QtMath>
 
+#include <algorithm>
+#include <limits>
+
 namespace {
 QString defaultMatrixInput() {
     return "0 2 3 -1\n"
@@ -58,6 +61,73 @@ bool parseWeightToken(const QString& token, int& value, bool& hasEdge) {
     hasEdge = true;
     value = w;
     return true;
+}
+
+QVector<QPointF> buildWeightAwareLayout(const QVector<Edge>& edges, int vertexCount, const QPointF& center) {
+    QVector<QPointF> positions(vertexCount);
+    if (vertexCount <= 0) {
+        return positions;
+    }
+
+    constexpr double kNodeRadius = 150.0;
+    constexpr double kMinTargetDistance = 70.0;
+    constexpr double kMaxTargetDistance = 230.0;
+
+    int minWeight = std::numeric_limits<int>::max();
+    int maxWeight = std::numeric_limits<int>::min();
+    for (const auto& e : edges) {
+        minWeight = std::min(minWeight, e.weight);
+        maxWeight = std::max(maxWeight, e.weight);
+    }
+
+    const auto mapWeightToTargetDistance = [&](int weight) {
+        if (minWeight >= maxWeight) {
+            return (kMinTargetDistance + kMaxTargetDistance) / 2.0;
+        }
+        const double norm = static_cast<double>(weight - minWeight) / static_cast<double>(maxWeight - minWeight);
+        return kMinTargetDistance + norm * (kMaxTargetDistance - kMinTargetDistance);
+    };
+
+    for (int i = 0; i < vertexCount; ++i) {
+        const double angle = 2.0 * 3.14159265358979323846 * i / qMax(1, vertexCount);
+        positions[i] = QPointF(center.x() + kNodeRadius * qCos(angle), center.y() + kNodeRadius * qSin(angle));
+    }
+
+    constexpr int kIterations = 420;
+    constexpr double kStep = 0.015;
+    constexpr double kEps = 1e-6;
+
+    for (int iter = 0; iter < kIterations; ++iter) {
+        QVector<QPointF> displacements(vertexCount, QPointF(0, 0));
+
+        for (const auto& e : edges) {
+            QPointF delta = positions[e.v] - positions[e.u];
+            const double current = std::hypot(delta.x(), delta.y());
+            const double safeCurrent = qMax(current, kEps);
+            const double target = mapWeightToTargetDistance(e.weight);
+
+            const double error = safeCurrent - target;
+            const QPointF direction(delta.x() / safeCurrent, delta.y() / safeCurrent);
+            const QPointF force = direction * error;
+
+            displacements[e.u] += force;
+            displacements[e.v] -= force;
+        }
+
+        QPointF gravityCenter(0, 0);
+        for (int i = 0; i < vertexCount; ++i) {
+            positions[i] += displacements[i] * kStep;
+            gravityCenter += positions[i];
+        }
+        gravityCenter /= static_cast<double>(vertexCount);
+
+        const QPointF shift = center - gravityCenter;
+        for (auto& p : positions) {
+            p += shift;
+        }
+    }
+
+    return positions;
 }
 } // namespace
 
@@ -308,13 +378,7 @@ void MainWindow::drawGraph() {
 
     const int n = m_graph->vertexCount();
     const QPointF center(250, 190);
-    const double radius = qMin(150.0, 40.0 + n * 8.0);
-
-    QVector<QPointF> vertexPos(n);
-    for (int i = 0; i < n; ++i) {
-        const double angle = 2.0 * 3.14159265358979323846 * i / qMax(1, n);
-        vertexPos[i] = QPointF(center.x() + radius * qCos(angle), center.y() + radius * qSin(angle));
-    }
+    const QVector<QPointF> vertexPos = buildWeightAwareLayout(m_graph->edges(), n, center);
 
     for (const auto& e : m_graph->edges()) {
         const QPointF a = vertexPos[e.u];
