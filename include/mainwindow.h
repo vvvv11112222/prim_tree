@@ -59,7 +59,9 @@ private:
     std::unique_ptr<IGraphStorage> m_graph;
     QVector<MSTSolution> m_solutions;
     int m_currentSolution = 0;
+    // 始终表示“当前正在显示的步骤索引”。
     int m_currentStep = 0;
+    bool m_hasRenderedCurrentStep = false;
 
     QMap<int, QGraphicsLineItem*> m_edgeItems;
     QMap<int, QGraphicsEllipseItem*> m_vertexItems;

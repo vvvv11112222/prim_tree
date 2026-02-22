@@ -677,6 +677,7 @@ void MainWindow::onParseAndSolve() {
     m_output->clear();
     m_solutions.clear();
     m_currentStep = 0;
+    m_hasRenderedCurrentStep = false;
     m_currentSolution = 0;
     if (m_timer->isActive()) {
         m_timer->stop();
@@ -725,9 +726,10 @@ void MainWindow::onParseAndSolve() {
 
     m_status->setText("已求解，可点击“下一步”查看 Prim 过程");
     m_nextStepButton->setEnabled(true);
+    m_nextStepButton->setText("下一步");
     m_playButton->setEnabled(true);
     m_currentStep = 0;
-    renderCurrentStep();
+    m_hasRenderedCurrentStep = false;
 }
 
 void MainWindow::onNextStep() {
@@ -737,20 +739,54 @@ void MainWindow::onNextStep() {
 
     const int traceSize = m_solutions[m_currentSolution].trace.size();
     if (traceSize == 0) {
-        return;
-    }
-
-    renderCurrentStep();
-
-    if (m_currentStep < traceSize - 1) {
-        ++m_currentStep;
-    } else {
         if (m_timer->isActive()) {
             m_timer->stop();
             m_playButton->setText("自动播放");
         }
-        m_status->setText("动画播放完成（当前展示第1棵 MST 的求解过程）");
+        m_nextStepButton->setText("已完成");
+        m_status->setText("无可展示步骤（trace 为空）");
+        m_stepInfo->setText("步骤：-");
+        return;
     }
+
+    // 首次进入：先渲染当前步，不推进索引。
+    if (!m_hasRenderedCurrentStep) {
+        renderCurrentStep();
+        m_hasRenderedCurrentStep = true;
+        if (traceSize == 1) {
+            if (m_timer->isActive()) {
+                m_timer->stop();
+                m_playButton->setText("自动播放");
+            }
+            m_nextStepButton->setText("已完成");
+            m_status->setText("动画播放完成（当前展示第1棵 MST 的求解过程）");
+        } else {
+            m_nextStepButton->setText("下一步");
+        }
+        return;
+    }
+
+    // 常规点击：先判断是否可前进，可前进则推进后渲染。
+    if (m_currentStep < traceSize - 1) {
+        ++m_currentStep;
+        renderCurrentStep();
+        if (m_currentStep == traceSize - 1) {
+            if (m_timer->isActive()) {
+                m_timer->stop();
+                m_playButton->setText("自动播放");
+            }
+            m_nextStepButton->setText("已完成");
+            m_status->setText("动画播放完成（当前展示第1棵 MST 的求解过程）");
+        }
+        return;
+    }
+
+    if (m_timer->isActive()) {
+        m_timer->stop();
+        m_playButton->setText("自动播放");
+    }
+    m_nextStepButton->setText("已完成");
+    m_status->setText("动画播放完成（当前展示第1棵 MST 的求解过程）");
 }
 
 void MainWindow::onToggleAutoPlay() {
