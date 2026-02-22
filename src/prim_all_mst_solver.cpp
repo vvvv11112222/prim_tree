@@ -63,7 +63,7 @@ void PrimAllMSTSolver::dfs(const IGraphStorage& graph,
                            state.cost,
                            "在割边中找到当前最小权候选边"});
 
-    const auto edgeList = graph.edges();
+    const auto& edgeList = graph.edges();
     for (int edgeId : candidateIds) {
         const Edge e = edgeList[edgeId];
         const int nextVertex = state.inTree.contains(e.u) ? e.v : e.u;

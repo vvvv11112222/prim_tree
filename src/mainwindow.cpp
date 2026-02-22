@@ -604,9 +604,10 @@ void MainWindow::drawGraph() {
 
     const int n = m_graph->vertexCount();
     const QPointF center(250, 190);
-    const QVector<QPointF> vertexPos = buildWeightAwareLayout(m_graph->edges(), n, center);
+    const auto& edges = m_graph->edges();
+    const QVector<QPointF> vertexPos = buildWeightAwareLayout(edges, n, center);
 
-    for (const auto& e : m_graph->edges()) {
+    for (const auto& e : edges) {
         const QPointF a = vertexPos[e.u];
         const QPointF b = vertexPos[e.v];
         auto* line = m_scene->addLine(QLineF(a, b), QPen(Qt::gray, 1.2));
