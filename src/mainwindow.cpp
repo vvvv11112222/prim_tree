@@ -22,6 +22,11 @@
 
 #include <QtMath>
 
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <numeric>
+
 namespace {
 QString defaultMatrixInput() {
     return "0 2 3 -1\n"
@@ -58,6 +63,273 @@ bool parseWeightToken(const QString& token, int& value, bool& hasEdge) {
     hasEdge = true;
     value = w;
     return true;
+}
+
+QVector<QPointF> buildWeightAwareLayout(const QVector<Edge>& edges, int vertexCount, const QPointF& center) {
+    QVector<QPointF> positions(vertexCount, center);
+    if (vertexCount <= 0) {
+        return positions;
+    }
+    if (vertexCount == 1) {
+        return positions;
+    }
+
+    constexpr double kMinTargetDistance = 75.0;
+    constexpr double kMaxTargetDistance = 235.0;
+    constexpr double kCanvasRadius = 190.0;
+    constexpr double kMinVertexGap = 34.0;
+    constexpr double kHardOverlapGap = 24.0;
+    constexpr double kMinAngleRad = 0.52; // ~30°
+    constexpr double kCrowdRadius = 42.0;
+
+    constexpr double kLengthWeight = 1.0;
+    constexpr double kSeparationWeight = 140.0;
+    constexpr double kOverlapWeight = 360.0;
+    constexpr double kAngleWeight = 75.0;
+    constexpr double kCrowdWeight = 90.0;
+
+    int minWeight = std::numeric_limits<int>::max();
+    int maxWeight = std::numeric_limits<int>::min();
+    for (const auto& e : edges) {
+        minWeight = std::min(minWeight, e.weight);
+        maxWeight = std::max(maxWeight, e.weight);
+    }
+
+    const auto mapWeightToTargetDistance = [&](int weight) {
+        if (minWeight >= maxWeight) {
+            return (kMinTargetDistance + kMaxTargetDistance) * 0.5;
+        }
+        const double norm = static_cast<double>(weight - minWeight) / static_cast<double>(maxWeight - minWeight);
+        return kMinTargetDistance + norm * (kMaxTargetDistance - kMinTargetDistance);
+    };
+
+    struct NeighborRef {
+        int to;
+        int edgeIndex;
+    };
+
+    QVector<QVector<NeighborRef>> adjacency(vertexCount);
+    for (int i = 0; i < edges.size(); ++i) {
+        const auto& e = edges[i];
+        adjacency[e.u].push_back({e.v, i});
+        adjacency[e.v].push_back({e.u, i});
+    }
+
+    auto distance = [](const QPointF& a, const QPointF& b) {
+        return std::hypot(a.x() - b.x(), a.y() - b.y());
+    };
+
+    auto pointToSegmentDistance = [&](const QPointF& p, const QPointF& a, const QPointF& b) {
+        const QPointF ab = b - a;
+        const double ab2 = ab.x() * ab.x() + ab.y() * ab.y();
+        if (ab2 <= 1e-9) {
+            return distance(p, a);
+        }
+        const QPointF ap = p - a;
+        double t = (ap.x() * ab.x() + ap.y() * ab.y()) / ab2;
+        t = qBound(0.0, t, 1.0);
+        const QPointF proj = a + ab * t;
+        return distance(p, proj);
+    };
+
+    auto clampToCanvas = [&](const QPointF& p) {
+        QPointF d = p - center;
+        const double len = std::hypot(d.x(), d.y());
+        if (len <= kCanvasRadius || len <= 1e-9) {
+            return p;
+        }
+        return center + d * (kCanvasRadius / len);
+    };
+
+    auto energy = [&](const QVector<QPointF>& pts, const QVector<bool>& active) {
+        double e = 0.0;
+
+        for (const auto& edge : edges) {
+            if (!active[edge.u] || !active[edge.v]) {
+                continue;
+            }
+            const double d = distance(pts[edge.u], pts[edge.v]);
+            const double target = mapWeightToTargetDistance(edge.weight);
+            const double diff = d - target;
+            e += kLengthWeight * diff * diff;
+        }
+
+        for (int i = 0; i < vertexCount; ++i) {
+            if (!active[i]) {
+                continue;
+            }
+            for (int j = i + 1; j < vertexCount; ++j) {
+                if (!active[j]) {
+                    continue;
+                }
+                const double d = distance(pts[i], pts[j]);
+                if (d < kMinVertexGap) {
+                    const double p = kMinVertexGap - d;
+                    e += kSeparationWeight * p * p;
+                }
+                if (d < kHardOverlapGap) {
+                    const double p = kHardOverlapGap - d;
+                    e += kOverlapWeight * p * p;
+                }
+            }
+        }
+
+        for (int v = 0; v < vertexCount; ++v) {
+            if (!active[v]) {
+                continue;
+            }
+            const auto& nbs = adjacency[v];
+            for (int i = 0; i < nbs.size(); ++i) {
+                if (!active[nbs[i].to]) {
+                    continue;
+                }
+                for (int j = i + 1; j < nbs.size(); ++j) {
+                    if (!active[nbs[j].to]) {
+                        continue;
+                    }
+                    const QPointF a = pts[nbs[i].to] - pts[v];
+                    const QPointF b = pts[nbs[j].to] - pts[v];
+                    const double la = std::hypot(a.x(), a.y());
+                    const double lb = std::hypot(b.x(), b.y());
+                    if (la <= 1e-6 || lb <= 1e-6) {
+                        continue;
+                    }
+                    double c = (a.x() * b.x() + a.y() * b.y()) / (la * lb);
+                    c = qBound(-1.0, c, 1.0);
+                    const double angle = std::acos(c);
+                    if (angle < kMinAngleRad) {
+                        const double p = kMinAngleRad - angle;
+                        e += kAngleWeight * p * p;
+                    }
+                }
+            }
+        }
+
+        for (const auto& edge : edges) {
+            if (!active[edge.u] || !active[edge.v]) {
+                continue;
+            }
+            for (int v = 0; v < vertexCount; ++v) {
+                if (!active[v] || v == edge.u || v == edge.v) {
+                    continue;
+                }
+                const double d = pointToSegmentDistance(pts[v], pts[edge.u], pts[edge.v]);
+                if (d < kCrowdRadius) {
+                    const double p = kCrowdRadius - d;
+                    e += kCrowdWeight * p * p;
+                }
+            }
+        }
+
+        return e;
+    };
+
+    QVector<int> order(vertexCount);
+    std::iota(order.begin(), order.end(), 0);
+    std::sort(order.begin(), order.end(), [&](int a, int b) { return adjacency[a].size() > adjacency[b].size(); });
+
+    QVector<bool> placed(vertexCount, false);
+    const int first = order[0];
+    positions[first] = center;
+    placed[first] = true;
+
+    auto localSearch = [&](int vertex) {
+        double step = 38.0;
+        double bestE = energy(positions, placed);
+        for (int rounds = 0; rounds < 10; ++rounds) {
+            bool improved = false;
+            QPointF bestPos = positions[vertex];
+            for (int k = 0; k < 16; ++k) {
+                const double angle = 2.0 * 3.14159265358979323846 * k / 16.0;
+                QPointF cand = positions[vertex] + QPointF(step * std::cos(angle), step * std::sin(angle));
+                cand = clampToCanvas(cand);
+                const QPointF old = positions[vertex];
+                positions[vertex] = cand;
+                const double e = energy(positions, placed);
+                if (e < bestE) {
+                    bestE = e;
+                    bestPos = cand;
+                    improved = true;
+                }
+                positions[vertex] = old;
+            }
+            positions[vertex] = bestPos;
+            if (!improved) {
+                step *= 0.55;
+            }
+        }
+    };
+
+    for (int idx = 1; idx < order.size(); ++idx) {
+        const int next = order[idx];
+
+        QVector<int> anchors;
+        for (const auto& ref : adjacency[next]) {
+            if (placed[ref.to]) {
+                anchors.push_back(ref.to);
+            }
+        }
+
+        QVector<QPointF> candidates;
+        if (!anchors.isEmpty()) {
+            const int a = anchors[0];
+            int anchorWeight = minWeight;
+            for (const auto& ref : adjacency[next]) {
+                if (ref.to == a) {
+                    anchorWeight = edges[ref.edgeIndex].weight;
+                    break;
+                }
+            }
+            const double r = mapWeightToTargetDistance(anchorWeight);
+            for (int i = 0; i < 20; ++i) {
+                const double ang = 2.0 * 3.14159265358979323846 * i / 20.0;
+                candidates.push_back(clampToCanvas(positions[a] + QPointF(r * std::cos(ang), r * std::sin(ang))));
+            }
+        }
+
+        for (int i = 0; i < 12; ++i) {
+            const double ang = 2.0 * 3.14159265358979323846 * i / 12.0;
+            candidates.push_back(clampToCanvas(center + QPointF((70.0 + i * 6.0) * std::cos(ang), (70.0 + i * 6.0) * std::sin(ang))));
+        }
+
+        QPointF bestPos = center;
+        double bestE = std::numeric_limits<double>::max();
+        for (const QPointF& c : candidates) {
+            positions[next] = c;
+            placed[next] = true;
+            const double e = energy(positions, placed);
+            if (e < bestE) {
+                bestE = e;
+                bestPos = c;
+            }
+            placed[next] = false;
+        }
+
+        positions[next] = bestPos;
+        placed[next] = true;
+
+        localSearch(next);
+
+        for (int iter = 0; iter < 3; ++iter) {
+            for (int v = 0; v < vertexCount; ++v) {
+                if (placed[v]) {
+                    localSearch(v);
+                }
+            }
+        }
+    }
+
+    QPointF gravityCenter(0, 0);
+    for (int i = 0; i < vertexCount; ++i) {
+        gravityCenter += positions[i];
+    }
+    gravityCenter /= static_cast<double>(vertexCount);
+    const QPointF shift = center - gravityCenter;
+    for (auto& p : positions) {
+        p = clampToCanvas(p + shift);
+    }
+
+    return positions;
 }
 } // namespace
 
@@ -308,13 +580,7 @@ void MainWindow::drawGraph() {
 
     const int n = m_graph->vertexCount();
     const QPointF center(250, 190);
-    const double radius = qMin(150.0, 40.0 + n * 8.0);
-
-    QVector<QPointF> vertexPos(n);
-    for (int i = 0; i < n; ++i) {
-        const double angle = 2.0 * 3.14159265358979323846 * i / qMax(1, n);
-        vertexPos[i] = QPointF(center.x() + radius * qCos(angle), center.y() + radius * qSin(angle));
-    }
+    const QVector<QPointF> vertexPos = buildWeightAwareLayout(m_graph->edges(), n, center);
 
     for (const auto& e : m_graph->edges()) {
         const QPointF a = vertexPos[e.u];
