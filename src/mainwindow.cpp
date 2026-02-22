@@ -9,6 +9,7 @@
 #include <QGraphicsSimpleTextItem>
 #include <QGraphicsView>
 #include <QHBoxLayout>
+#include <QHash>
 #include <QLabel>
 #include <QPushButton>
 #include <QRandomGenerator>
@@ -502,9 +503,16 @@ bool MainWindow::parseAdjList(const QString& text, AdjListGraph& graph, QString&
         int u;
         int v;
         int w;
+        QString rawLine;
+    };
+
+    struct SeenEdgeInfo {
+        int weight;
+        QString rawLine;
     };
 
     QVector<Row> rows;
+    QHash<quint64, SeenEdgeInfo> seenEdges;
     int maxV = -1;
 
     for (const auto& rawLine : lines) {
@@ -528,7 +536,23 @@ bool MainWindow::parseAdjList(const QString& text, AdjListGraph& graph, QString&
             error = QString("邻接表含非法值，错误行: %1").arg(line);
             return false;
         }
-        rows.push_back({u, v, w});
+        const int a = qMin(u, v);
+        const int b = qMax(u, v);
+        const quint64 edgeKey = (static_cast<quint64>(a) << 32) | static_cast<quint32>(b);
+        const auto existing = seenEdges.constFind(edgeKey);
+        if (existing != seenEdges.constEnd()) {
+            if (existing->weight != w) {
+                error = QString("检测到重复边且权重冲突，已有行: %1；冲突行: %2")
+                            .arg(existing->rawLine, line);
+                return false;
+            }
+            error = QString("检测到重复边，请删除重复定义。已有行: %1；重复行: %2")
+                        .arg(existing->rawLine, line);
+            return false;
+        }
+
+        seenEdges.insert(edgeKey, {w, line});
+        rows.push_back({u, v, w, line});
         maxV = qMax(maxV, qMax(u, v));
     }
 
