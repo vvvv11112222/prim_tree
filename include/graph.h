@@ -15,7 +15,7 @@ public:
     virtual ~IGraphStorage() = default;
     virtual int vertexCount() const = 0;
     virtual int edgeCount() const = 0;
-    virtual QVector<Edge> edges() const = 0;
+    virtual const QVector<Edge>& edges() const = 0;
     virtual QVector<int> neighbors(int vertex) const = 0;
     virtual int edgeId(int u, int v) const = 0;
     virtual int edgeWeight(int u, int v) const = 0;
@@ -29,7 +29,7 @@ public:
 
     int vertexCount() const override;
     int edgeCount() const override;
-    QVector<Edge> edges() const override;
+    const QVector<Edge>& edges() const override;
     QVector<int> neighbors(int vertex) const override;
     int edgeId(int u, int v) const override;
     int edgeWeight(int u, int v) const override;
@@ -49,7 +49,7 @@ public:
 
     int vertexCount() const override;
     int edgeCount() const override;
-    QVector<Edge> edges() const override;
+    const QVector<Edge>& edges() const override;
     QVector<int> neighbors(int vertex) const override;
     int edgeId(int u, int v) const override;
     int edgeWeight(int u, int v) const override;

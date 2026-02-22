@@ -31,7 +31,7 @@ void AdjMatrixGraph::addEdge(int u, int v, int w) {
 
 int AdjMatrixGraph::vertexCount() const { return m_n; }
 int AdjMatrixGraph::edgeCount() const { return m_edges.size(); }
-QVector<Edge> AdjMatrixGraph::edges() const { return m_edges; }
+const QVector<Edge>& AdjMatrixGraph::edges() const { return m_edges; }
 
 QVector<int> AdjMatrixGraph::neighbors(int vertex) const {
     QVector<int> result;
@@ -68,7 +68,7 @@ void AdjListGraph::addEdge(int u, int v, int w) {
 
 int AdjListGraph::vertexCount() const { return m_n; }
 int AdjListGraph::edgeCount() const { return m_edges.size(); }
-QVector<Edge> AdjListGraph::edges() const { return m_edges; }
+const QVector<Edge>& AdjListGraph::edges() const { return m_edges; }
 
 QVector<int> AdjListGraph::neighbors(int vertex) const {
     QVector<int> result;
