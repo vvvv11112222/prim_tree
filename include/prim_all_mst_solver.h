@@ -20,6 +20,28 @@ struct PrimStep {
     int chosenEdgeId = -1;
     int currentCost = 0;
     QString note;
+
+    int branchNodeId = -1;
+    int branchParentId = -1;
+    int branchEdgeId = -1;
+};
+
+struct BranchTreeNode {
+    int id = -1;
+    int parentId = -1;
+    int depth = 0;
+    int viaEdgeId = -1;
+
+    QVector<int> verticesInTree;
+    QVector<int> selectedEdgeIds;
+    QVector<int> candidateEdgeIds;
+    int currentCost = 0;
+
+    bool isBacktrack = false;
+    bool isPruned = false;
+    bool isComplete = false;
+    bool reachesOptimalSolution = false;
+    QString label;
 };
 
 struct MSTSolution {
@@ -44,6 +66,8 @@ struct SolverStats {
 struct SolveResult {
     QVector<MSTSolution> solutions;
     SolverStats stats;
+    QVector<BranchTreeNode> branchNodes;
+    int branchRootId = -1;
 };
 
 class PrimAllMSTSolver {
@@ -56,6 +80,8 @@ private:
         QVector<int> edgeIds;
         int cost = 0;
         QVector<PrimStep> trace;
+
+        int branchNodeId = -1;
     };
 
     QVector<int> minCutEdges(const IGraphStorage& graph, const QSet<int>& inTree) const;
@@ -66,5 +92,7 @@ private:
              QVector<MSTSolution>& out,
              QSet<QString>& dedup,
              const SolverLimits& limits,
-             SolverStats& stats) const;
+             SolverStats& stats,
+             QVector<BranchTreeNode>& branchNodes,
+             QVector<int>& branchPath) const;
 };

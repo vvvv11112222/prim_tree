@@ -19,6 +19,8 @@
 #include <QSplitter>
 #include <QTextEdit>
 #include <QTimer>
+#include <QTreeWidget>
+#include <QTreeWidgetItem>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -408,9 +410,24 @@ void MainWindow::setupUi() {
 
     auto* right = new QWidget(splitter);
     auto* rightLayout = new QVBoxLayout(right);
+
+    m_filterOptimalOnly = new QCheckBox("仅显示可到达最优解分支", right);
+    m_hidePruned = new QCheckBox("隐藏被剪枝分支", right);
+    connect(m_filterOptimalOnly, &QCheckBox::toggled, this, &MainWindow::onBranchFilterChanged);
+    connect(m_hidePruned, &QCheckBox::toggled, this, &MainWindow::onBranchFilterChanged);
+
+    m_branchTree = new QTreeWidget(right);
+    m_branchTree->setHeaderLabels({"分支树节点", "代价", "标签"});
+    connect(m_branchTree, &QTreeWidget::itemClicked, this, &MainWindow::onBranchTreeItemClicked);
+
+    rightLayout->addWidget(new QLabel("分支树", right));
+    rightLayout->addWidget(m_filterOptimalOnly);
+    rightLayout->addWidget(m_hidePruned);
+    rightLayout->addWidget(m_branchTree, 1);
+
     m_output = new QTextEdit(right);
     m_output->setReadOnly(true);
-    rightLayout->addWidget(m_output);
+    rightLayout->addWidget(m_output, 1);
 
     splitter->addWidget(left);
     splitter->addWidget(right);
@@ -439,6 +456,100 @@ void MainWindow::setupUi() {
 
     setWindowTitle("Prim 所有最小生成树可视化");
     resize(1180, 720);
+}
+
+void MainWindow::renderBranchState(const BranchTreeNode& node) {
+    resetStepStyle();
+
+    for (int v : node.verticesInTree) {
+        if (m_vertexItems.contains(v)) {
+            m_vertexItems[v]->setBrush(QBrush(QColor(202, 255, 191)));
+        }
+    }
+
+    for (int edgeId : node.selectedEdgeIds) {
+        if (m_edgeItems.contains(edgeId)) {
+            m_edgeItems[edgeId]->setPen(QPen(QColor(24, 140, 60), 2.4));
+        }
+    }
+
+    for (int edgeId : node.candidateEdgeIds) {
+        if (m_edgeItems.contains(edgeId)) {
+            m_edgeItems[edgeId]->setPen(QPen(QColor(227, 151, 48), 2.4));
+        }
+    }
+
+    if (node.viaEdgeId >= 0 && m_edgeItems.contains(node.viaEdgeId)) {
+        m_edgeItems[node.viaEdgeId]->setPen(QPen(QColor(210, 35, 35), 3.2));
+    }
+
+    m_stepInfo->setText(QString("分支节点 #%1：%2（当前代价=%3）").arg(node.id).arg(node.label).arg(node.currentCost));
+}
+
+void MainWindow::rebuildBranchTree() {
+    m_branchTree->clear();
+    if (m_branchNodes.isEmpty() || m_branchRootId < 0 || m_branchRootId >= m_branchNodes.size()) {
+        return;
+    }
+
+    QMap<int, QVector<int>> children;
+    for (const auto& node : m_branchNodes) {
+        children[node.parentId].push_back(node.id);
+    }
+
+    QMap<int, QTreeWidgetItem*> itemById;
+    QVector<int> stack = {m_branchRootId};
+    while (!stack.isEmpty()) {
+        const int id = stack.takeFirst();
+        for (int child : children[id]) {
+            stack.push_back(child);
+        }
+
+        const auto& node = m_branchNodes[id];
+        if (m_filterOptimalOnly->isChecked() && !node.reachesOptimalSolution) {
+            continue;
+        }
+        if (m_hidePruned->isChecked() && node.isPruned) {
+            continue;
+        }
+
+        QString title = QString("#%1").arg(node.id);
+        if (node.isComplete) {
+            title += " ✅";
+        } else if (node.isPruned) {
+            title += " ✂";
+        } else if (node.isBacktrack) {
+            title += " ↩";
+        }
+
+        auto* item = new QTreeWidgetItem({title, QString::number(node.currentCost), node.label});
+        item->setData(0, Qt::UserRole, node.id);
+        if (node.parentId >= 0 && itemById.contains(node.parentId)) {
+            itemById[node.parentId]->addChild(item);
+        } else {
+            m_branchTree->addTopLevelItem(item);
+        }
+        itemById.insert(node.id, item);
+
+    }
+
+    m_branchTree->expandToDepth(2);
+}
+
+void MainWindow::onBranchTreeItemClicked(QTreeWidgetItem* item, int /*column*/) {
+    if (!item) {
+        return;
+    }
+    bool ok = false;
+    const int nodeId = item->data(0, Qt::UserRole).toInt(&ok);
+    if (!ok || nodeId < 0 || nodeId >= m_branchNodes.size()) {
+        return;
+    }
+    renderBranchState(m_branchNodes[nodeId]);
+}
+
+void MainWindow::onBranchFilterChanged() {
+    rebuildBranchTree();
 }
 
 bool MainWindow::parseAdjMatrix(const QString& text, AdjMatrixGraph& graph, QString& error) const {
@@ -702,6 +813,9 @@ void MainWindow::onParseAndSolve() {
     QString error;
     m_output->clear();
     m_solutions.clear();
+    m_branchNodes.clear();
+    m_branchRootId = -1;
+    m_branchTree->clear();
     m_currentStep = 0;
     m_hasRenderedCurrentStep = false;
     m_currentSolution = 0;
@@ -737,6 +851,9 @@ void MainWindow::onParseAndSolve() {
     limits.maxExpandedStates = 100000;
     const SolveResult solveResult = solver.solveAll(*m_graph, start, limits);
     m_solutions = solveResult.solutions;
+    m_branchNodes = solveResult.branchNodes;
+    m_branchRootId = solveResult.branchRootId;
+    rebuildBranchTree();
 
     m_output->append(
         QString("输入解析成功：顶点=%1, 边=%2, 起点=%3").arg(m_graph->vertexCount()).arg(m_graph->edgeCount()).arg(start));
