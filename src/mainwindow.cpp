@@ -14,6 +14,7 @@
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSpinBox>
+#include <QStringList>
 #include <QSplitter>
 #include <QTextEdit>
 #include <QTimer>
@@ -705,7 +706,11 @@ void MainWindow::onParseAndSolve() {
     const int start = m_randomStart->isChecked() ? QRandomGenerator::global()->bounded(n) : m_startVertex->value();
 
     PrimAllMSTSolver solver;
-    m_solutions = solver.solveAll(*m_graph, start);
+    SolverLimits limits;
+    limits.maxSolutions = 200;
+    limits.maxExpandedStates = 100000;
+    const SolveResult solveResult = solver.solveAll(*m_graph, start, limits);
+    m_solutions = solveResult.solutions;
 
     m_output->append(
         QString("输入解析成功：顶点=%1, 边=%2, 起点=%3").arg(m_graph->vertexCount()).arg(m_graph->edgeCount()).arg(start));
@@ -713,6 +718,18 @@ void MainWindow::onParseAndSolve() {
 
     for (int i = 0; i < m_solutions.size(); ++i) {
         m_output->append(QString("MST #%1 -> %2").arg(i + 1).arg(mstToString(m_solutions[i])));
+    }
+
+    m_output->append(QString("搜索扩展节点数: %1").arg(solveResult.stats.expandedStates));
+    if (solveResult.stats.isTruncated()) {
+        QStringList reasons;
+        if (solveResult.stats.truncatedBySolutionLimit) {
+            reasons << QString("达到结果数量上限(%1)").arg(limits.maxSolutions);
+        }
+        if (solveResult.stats.truncatedByStateLimit) {
+            reasons << QString("达到搜索节点上限(%1)").arg(limits.maxExpandedStates);
+        }
+        m_output->append(QString("结果已截断：%1。请缩小图规模或提高上限。").arg(reasons.join("，")));
     }
 
     if (m_solutions.isEmpty()) {
@@ -723,7 +740,11 @@ void MainWindow::onParseAndSolve() {
         return;
     }
 
-    m_status->setText("已求解，可点击“下一步”查看 Prim 过程");
+    if (solveResult.stats.isTruncated()) {
+        m_status->setText("结果已截断，请缩小图规模（仍可查看当前结果）");
+    } else {
+        m_status->setText("已求解，可点击“下一步”查看 Prim 过程");
+    }
     m_nextStepButton->setEnabled(true);
     m_playButton->setEnabled(true);
     m_currentStep = 0;

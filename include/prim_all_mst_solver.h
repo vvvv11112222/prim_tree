@@ -28,9 +28,27 @@ struct MSTSolution {
     QVector<PrimStep> trace;
 };
 
+struct SolverLimits {
+    int maxSolutions = 200;
+    int maxExpandedStates = 100000;
+};
+
+struct SolverStats {
+    int expandedStates = 0;
+    bool truncatedBySolutionLimit = false;
+    bool truncatedByStateLimit = false;
+
+    bool isTruncated() const { return truncatedBySolutionLimit || truncatedByStateLimit; }
+};
+
+struct SolveResult {
+    QVector<MSTSolution> solutions;
+    SolverStats stats;
+};
+
 class PrimAllMSTSolver {
 public:
-    QVector<MSTSolution> solveAll(const IGraphStorage& graph, int startVertex) const;
+    SolveResult solveAll(const IGraphStorage& graph, int startVertex, const SolverLimits& limits = {}) const;
 
 private:
     struct SearchState {
@@ -46,5 +64,7 @@ private:
              int bestCost,
              SearchState state,
              QVector<MSTSolution>& out,
-             QSet<QString>& dedup) const;
+             QSet<QString>& dedup,
+             const SolverLimits& limits,
+             SolverStats& stats) const;
 };

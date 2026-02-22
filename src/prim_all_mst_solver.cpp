@@ -40,7 +40,19 @@ void PrimAllMSTSolver::dfs(const IGraphStorage& graph,
                            int bestCost,
                            SearchState state,
                            QVector<MSTSolution>& out,
-                           QSet<QString>& dedup) const {
+                           QSet<QString>& dedup,
+                           const SolverLimits& limits,
+                           SolverStats& stats) const {
+    if (stats.expandedStates >= limits.maxExpandedStates) {
+        stats.truncatedByStateLimit = true;
+        return;
+    }
+    if (out.size() >= limits.maxSolutions) {
+        stats.truncatedBySolutionLimit = true;
+        return;
+    }
+
+    ++stats.expandedStates;
     if (state.edgeIds.size() == graph.vertexCount() - 1) {
         if (state.cost != bestCost) {
             return;
@@ -52,6 +64,9 @@ void PrimAllMSTSolver::dfs(const IGraphStorage& graph,
         dedup.insert(key);
         state.trace.push_back({PrimStep::Type::CompleteMST, state.inTree.values().toVector(), state.edgeIds, -1, state.cost, "找到一棵最小生成树"});
         out.push_back({state.edgeIds, state.cost, state.trace});
+        if (out.size() >= limits.maxSolutions) {
+            stats.truncatedBySolutionLimit = true;
+        }
         return;
     }
 
@@ -84,12 +99,12 @@ void PrimAllMSTSolver::dfs(const IGraphStorage& graph,
         if (next.cost > bestCost) {
             continue;
         }
-        dfs(graph, bestCost, next, out, dedup);
+        dfs(graph, bestCost, next, out, dedup, limits, stats);
     }
 }
 
-QVector<MSTSolution> PrimAllMSTSolver::solveAll(const IGraphStorage& graph, int startVertex) const {
-    QVector<MSTSolution> result;
+SolveResult PrimAllMSTSolver::solveAll(const IGraphStorage& graph, int startVertex, const SolverLimits& limits) const {
+    SolveResult result;
     if (graph.vertexCount() == 0 || startVertex < 0 || startVertex >= graph.vertexCount()) {
         return result;
     }
@@ -115,7 +130,7 @@ QVector<MSTSolution> PrimAllMSTSolver::solveAll(const IGraphStorage& graph, int 
             }
         }
         if (pickU == -1) {
-            return {};
+            return result;
         }
         bestCost += pickWeight;
         inTree.insert(inTree.contains(pickU) ? pickV : pickU);
@@ -126,6 +141,6 @@ QVector<MSTSolution> PrimAllMSTSolver::solveAll(const IGraphStorage& graph, int 
     init.trace.push_back({PrimStep::Type::ConsiderCut, {startVertex}, {}, -1, 0, "从随机起点开始"});
 
     QSet<QString> dedup;
-    dfs(graph, bestCost, init, result, dedup);
+    dfs(graph, bestCost, init, result.solutions, dedup, limits, result.stats);
     return result;
 }
