@@ -6,6 +6,58 @@
 #include <algorithm>
 #include <climits>
 
+namespace {
+QVector<int> sortedValues(const QSet<int>& values) {
+    QVector<int> out = values.values().toVector();
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+QVector<int> sortedCopy(const QVector<int>& values) {
+    QVector<int> out = values;
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+int appendBranchNode(QVector<BranchTreeNode>& nodes,
+                     int parentId,
+                     int depth,
+                     int viaEdgeId,
+                     const QSet<int>& inTree,
+                     const QVector<int>& selectedEdgeIds,
+                     const QVector<int>& candidateEdgeIds,
+                     int currentCost,
+                     const QString& label,
+                     bool isBacktrack = false,
+                     bool isPruned = false,
+                     bool isComplete = false) {
+    BranchTreeNode node;
+    node.id = nodes.size();
+    node.parentId = parentId;
+    node.depth = depth;
+    node.viaEdgeId = viaEdgeId;
+    node.verticesInTree = sortedValues(inTree);
+    node.selectedEdgeIds = sortedCopy(selectedEdgeIds);
+    node.candidateEdgeIds = sortedCopy(candidateEdgeIds);
+    node.currentCost = currentCost;
+    node.isBacktrack = isBacktrack;
+    node.isPruned = isPruned;
+    node.isComplete = isComplete;
+    node.label = label;
+    nodes.push_back(node);
+    return node.id;
+}
+
+void markOptimalPath(QVector<BranchTreeNode>& branchNodes, const QVector<int>& branchPath) {
+    for (int id : branchPath) {
+        if (id >= 0 && id < branchNodes.size()) {
+            branchNodes[id].reachesOptimalSolution = true;
+        }
+    }
+}
+
+} // namespace
+
 QVector<int> PrimAllMSTSolver::minCutEdges(const IGraphStorage& graph, const QSet<int>& inTree) const {
     QVector<int> cut;
     int minWeight = INT_MAX;
@@ -42,7 +94,9 @@ void PrimAllMSTSolver::dfs(const IGraphStorage& graph,
                            QVector<MSTSolution>& out,
                            QSet<QString>& dedup,
                            const SolverLimits& limits,
-                           SolverStats& stats) const {
+                           SolverStats& stats,
+                           QVector<BranchTreeNode>& branchNodes,
+                           QVector<int>& branchPath) const {
     if (stats.expandedStates >= limits.maxExpandedStates) {
         stats.truncatedByStateLimit = true;
         return;
@@ -62,7 +116,32 @@ void PrimAllMSTSolver::dfs(const IGraphStorage& graph,
             return;
         }
         dedup.insert(key);
-        state.trace.push_back({PrimStep::Type::CompleteMST, state.inTree.values().toVector(), state.edgeIds, -1, state.cost, "找到一棵最小生成树"});
+
+        const int completeId = appendBranchNode(branchNodes,
+                                                state.branchNodeId,
+                                                state.edgeIds.size() + 1,
+                                                -1,
+                                                state.inTree,
+                                                state.edgeIds,
+                                                {},
+                                                state.cost,
+                                                QString("✅ 最优解 cost=%1").arg(state.cost),
+                                                false,
+                                                false,
+                                                true);
+        branchPath.push_back(completeId);
+        markOptimalPath(branchNodes, branchPath);
+        branchPath.pop_back();
+
+        state.trace.push_back({PrimStep::Type::CompleteMST,
+                               sortedValues(state.inTree),
+                               sortedCopy(state.edgeIds),
+                               -1,
+                               state.cost,
+                               "找到一棵最小生成树",
+                               completeId,
+                               state.branchNodeId,
+                               -1});
         out.push_back({state.edgeIds, state.cost, state.trace});
         if (out.size() >= limits.maxSolutions) {
             stats.truncatedBySolutionLimit = true;
@@ -71,12 +150,29 @@ void PrimAllMSTSolver::dfs(const IGraphStorage& graph,
     }
 
     const QVector<int> candidateIds = minCutEdges(graph, state.inTree);
+    const int expandId = appendBranchNode(branchNodes,
+                                          state.branchNodeId,
+                                          state.edgeIds.size() + 1,
+                                          -1,
+                                          state.inTree,
+                                          state.edgeIds,
+                                          candidateIds,
+                                          state.cost,
+                                          QString("展开分支，候选边=%1").arg(candidateIds.size()));
+
     state.trace.push_back({PrimStep::Type::CandidateMinEdges,
-                           state.inTree.values().toVector(),
-                           candidateIds,
+                           sortedValues(state.inTree),
+                           sortedCopy(candidateIds),
                            -1,
                            state.cost,
-                           "在割边中找到当前最小权候选边"});
+                           "在割边中找到当前最小权候选边",
+                           expandId,
+                           state.branchNodeId,
+                           -1});
+
+    const int oldParent = state.branchNodeId;
+    state.branchNodeId = expandId;
+    branchPath.push_back(expandId);
 
     const auto& edgeList = graph.edges();
     for (int edgeId : candidateIds) {
@@ -90,17 +186,66 @@ void PrimAllMSTSolver::dfs(const IGraphStorage& graph,
         next.inTree.insert(nextVertex);
         next.edgeIds.push_back(edgeId);
         next.cost += e.weight;
+
+        const int chooseId = appendBranchNode(branchNodes,
+                                              state.branchNodeId,
+                                              next.edgeIds.size() + 1,
+                                              edgeId,
+                                              next.inTree,
+                                              next.edgeIds,
+                                              candidateIds,
+                                              next.cost,
+                                              QString("选择边 #%1 (%2-%3,w=%4)").arg(edgeId).arg(e.u).arg(e.v).arg(e.weight));
+
         next.trace.push_back({PrimStep::Type::ChooseEdge,
-                              next.inTree.values().toVector(),
-                              candidateIds,
+                              sortedValues(next.inTree),
+                              sortedCopy(candidateIds),
                               edgeId,
                               next.cost,
-                              QString("选择边(%1,%2,w=%3)").arg(e.u).arg(e.v).arg(e.weight)});
+                              QString("选择边(%1,%2,w=%3)").arg(e.u).arg(e.v).arg(e.weight),
+                              chooseId,
+                              state.branchNodeId,
+                              edgeId});
+
+        next.branchNodeId = chooseId;
+        branchPath.push_back(chooseId);
+
         if (next.cost > bestCost) {
+            appendBranchNode(branchNodes,
+                             next.branchNodeId,
+                             next.edgeIds.size() + 2,
+                             -1,
+                             next.inTree,
+                             next.edgeIds,
+                             {},
+                             next.cost,
+                             QString("✂ 剪枝：cost=%1 > best=%2").arg(next.cost).arg(bestCost),
+                             false,
+                             true,
+                             false);
+            branchPath.pop_back();
             continue;
         }
-        dfs(graph, bestCost, next, out, dedup, limits, stats);
+
+        dfs(graph, bestCost, next, out, dedup, limits, stats, branchNodes, branchPath);
+
+        appendBranchNode(branchNodes,
+                         next.branchNodeId,
+                         next.edgeIds.size() + 2,
+                         -1,
+                         next.inTree,
+                         next.edgeIds,
+                         {},
+                         next.cost,
+                         "↩ 回溯",
+                         true,
+                         false,
+                         false);
+        branchPath.pop_back();
     }
+
+    state.branchNodeId = oldParent;
+    branchPath.pop_back();
 }
 
 SolveResult PrimAllMSTSolver::solveAll(const IGraphStorage& graph, int startVertex, const SolverLimits& limits) const {
@@ -109,7 +254,6 @@ SolveResult PrimAllMSTSolver::solveAll(const IGraphStorage& graph, int startVert
         return result;
     }
 
-    // 先做一次标准 Prim 得到最优值上界。
     QSet<int> inTree = {startVertex};
     int bestCost = 0;
 
@@ -129,18 +273,38 @@ SolveResult PrimAllMSTSolver::solveAll(const IGraphStorage& graph, int startVert
                 pickV = e.v;
             }
         }
-        if (pickU == -1) {
+        if (pickWeight == INT_MAX) {
             return result;
         }
         bestCost += pickWeight;
-        inTree.insert(inTree.contains(pickU) ? pickV : pickU);
+        inTree.insert(pickU);
+        inTree.insert(pickV);
     }
 
     SearchState init;
     init.inTree.insert(startVertex);
-    init.trace.push_back({PrimStep::Type::ConsiderCut, {startVertex}, {}, -1, 0, "从随机起点开始"});
+
+    result.branchRootId = appendBranchNode(result.branchNodes,
+                                           -1,
+                                           0,
+                                           -1,
+                                           init.inTree,
+                                           {},
+                                           {},
+                                           0,
+                                           QString("起点=%1").arg(startVertex));
+    init.branchNodeId = result.branchRootId;
 
     QSet<QString> dedup;
-    dfs(graph, bestCost, init, result.solutions, dedup, limits, result.stats);
+    QVector<int> branchPath = {result.branchRootId};
+    dfs(graph,
+        bestCost,
+        init,
+        result.solutions,
+        dedup,
+        limits,
+        result.stats,
+        result.branchNodes,
+        branchPath);
     return result;
 }

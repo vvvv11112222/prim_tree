@@ -18,6 +18,8 @@ class QPushButton;
 class QSpinBox;
 class QTextEdit;
 class QTimer;
+class QTreeWidget;
+class QTreeWidgetItem;
 
 class MainWindow final : public QMainWindow {
     Q_OBJECT
@@ -29,6 +31,8 @@ private slots:
     void onParseAndSolve();
     void onNextStep();
     void onToggleAutoPlay();
+    void onBranchTreeItemClicked(QTreeWidgetItem* item, int column);
+    void onBranchFilterChanged();
 
 private:
     void setupUi();
@@ -37,6 +41,8 @@ private:
     void renderCurrentStep();
     void resetStepStyle();
     QVector<int> selectedEdgesUntilStep(int stepIndex) const;
+    void renderBranchState(const BranchTreeNode& node);
+    void rebuildBranchTree();
 
     bool buildGraphFromInput(QString& error);
     bool parseAdjMatrix(const QString& text, AdjMatrixGraph& graph, QString& error) const;
@@ -55,11 +61,15 @@ private:
     QLabel* m_stepInfo = nullptr;
     QGraphicsScene* m_scene = nullptr;
     QTimer* m_timer = nullptr;
+    QTreeWidget* m_branchTree = nullptr;
+    QCheckBox* m_filterOptimalOnly = nullptr;
+    QCheckBox* m_hidePruned = nullptr;
 
     std::unique_ptr<IGraphStorage> m_graph;
     QVector<MSTSolution> m_solutions;
+    QVector<BranchTreeNode> m_branchNodes;
+    int m_branchRootId = -1;
     int m_currentSolution = 0;
-    // 始终表示“当前正在显示的步骤索引”。
     int m_currentStep = 0;
     bool m_hasRenderedCurrentStep = false;
 
