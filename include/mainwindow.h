@@ -5,6 +5,7 @@
 
 #include <QMainWindow>
 
+#include <QHash>
 #include <QMap>
 #include <memory>
 
@@ -33,6 +34,9 @@ private slots:
     void onToggleAutoPlay();
     void onBranchTreeItemClicked(QTreeWidgetItem* item, int column);
     void onBranchFilterChanged();
+    void onPrevVisibleBranchNode();
+    void onNextVisibleBranchNode();
+    void onNextVisibleLeafNode();
 
 private:
     void setupUi();
@@ -43,6 +47,9 @@ private:
     QVector<int> selectedEdgesUntilStep(int stepIndex) const;
     void renderBranchState(const BranchTreeNode& node);
     void rebuildBranchTree();
+    void rebuildVisibleBranchSequence(int preferredNodeId = -1, int preferredIndex = -1);
+    void navigateToVisibleBranchIndex(int index);
+    void updateBranchNavigationButtons();
 
     bool buildGraphFromInput(QString& error);
     bool parseAdjMatrix(const QString& text, AdjMatrixGraph& graph, QString& error) const;
@@ -64,6 +71,9 @@ private:
     QTreeWidget* m_branchTree = nullptr;
     QCheckBox* m_filterOptimalOnly = nullptr;
     QCheckBox* m_hidePruned = nullptr;
+    QPushButton* m_prevVisibleNodeButton = nullptr;
+    QPushButton* m_nextVisibleNodeButton = nullptr;
+    QPushButton* m_nextVisibleLeafButton = nullptr;
 
     std::unique_ptr<IGraphStorage> m_graph;
     QVector<MSTSolution> m_solutions;
@@ -75,4 +85,8 @@ private:
 
     QMap<int, QGraphicsLineItem*> m_edgeItems;
     QMap<int, QGraphicsEllipseItem*> m_vertexItems;
+    QMap<int, QTreeWidgetItem*> m_branchTreeItemsById;
+    QVector<int> m_visibleBranchNodeIds;
+    QHash<int, int> m_visibleBranchIndexById;
+    int m_currentVisibleBranchIndex = -1;
 };

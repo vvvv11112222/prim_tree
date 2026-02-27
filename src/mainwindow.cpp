@@ -416,6 +416,13 @@ void MainWindow::setupUi() {
     connect(m_filterOptimalOnly, &QCheckBox::toggled, this, &MainWindow::onBranchFilterChanged);
     connect(m_hidePruned, &QCheckBox::toggled, this, &MainWindow::onBranchFilterChanged);
 
+    m_prevVisibleNodeButton = new QPushButton("上一个节点", right);
+    m_nextVisibleNodeButton = new QPushButton("下一个节点", right);
+    m_nextVisibleLeafButton = new QPushButton("下一个叶子", right);
+    connect(m_prevVisibleNodeButton, &QPushButton::clicked, this, &MainWindow::onPrevVisibleBranchNode);
+    connect(m_nextVisibleNodeButton, &QPushButton::clicked, this, &MainWindow::onNextVisibleBranchNode);
+    connect(m_nextVisibleLeafButton, &QPushButton::clicked, this, &MainWindow::onNextVisibleLeafNode);
+
     m_branchTree = new QTreeWidget(right);
     m_branchTree->setHeaderLabels({"分支树节点", "代价", "标签"});
     connect(m_branchTree, &QTreeWidget::itemClicked, this, &MainWindow::onBranchTreeItemClicked);
@@ -423,7 +430,11 @@ void MainWindow::setupUi() {
     rightLayout->addWidget(new QLabel("分支树", right));
     rightLayout->addWidget(m_filterOptimalOnly);
     rightLayout->addWidget(m_hidePruned);
+    rightLayout->addWidget(m_prevVisibleNodeButton);
+    rightLayout->addWidget(m_nextVisibleNodeButton);
+    rightLayout->addWidget(m_nextVisibleLeafButton);
     rightLayout->addWidget(m_branchTree, 1);
+    updateBranchNavigationButtons();
 
     m_output = new QTextEdit(right);
     m_output->setReadOnly(true);
@@ -483,12 +494,27 @@ void MainWindow::renderBranchState(const BranchTreeNode& node) {
         m_edgeItems[node.viaEdgeId]->setPen(QPen(QColor(210, 35, 35), 3.2));
     }
 
-    m_stepInfo->setText(QString("分支节点 #%1：%2（当前代价=%3）").arg(node.id).arg(node.label).arg(node.currentCost));
+    QString visibleInfo;
+    if (m_currentVisibleBranchIndex >= 0 && m_currentVisibleBranchIndex < m_visibleBranchNodeIds.size()) {
+        visibleInfo = QString("（第 %1 / %2 可见节点）").arg(m_currentVisibleBranchIndex + 1).arg(m_visibleBranchNodeIds.size());
+    }
+    m_stepInfo->setText(
+        QString("分支节点 #%1：%2（当前代价=%3）%4").arg(node.id).arg(node.label).arg(node.currentCost).arg(visibleInfo));
 }
 
 void MainWindow::rebuildBranchTree() {
+    const int previousNodeId =
+        (m_currentVisibleBranchIndex >= 0 && m_currentVisibleBranchIndex < m_visibleBranchNodeIds.size())
+            ? m_visibleBranchNodeIds[m_currentVisibleBranchIndex]
+            : -1;
+
     m_branchTree->clear();
+    m_branchTreeItemsById.clear();
     if (m_branchNodes.isEmpty() || m_branchRootId < 0 || m_branchRootId >= m_branchNodes.size()) {
+        m_visibleBranchNodeIds.clear();
+        m_visibleBranchIndexById.clear();
+        m_currentVisibleBranchIndex = -1;
+        updateBranchNavigationButtons();
         return;
     }
 
@@ -530,10 +556,104 @@ void MainWindow::rebuildBranchTree() {
             m_branchTree->addTopLevelItem(item);
         }
         itemById.insert(node.id, item);
-
+        m_branchTreeItemsById.insert(node.id, item);
     }
 
     m_branchTree->expandToDepth(2);
+    rebuildVisibleBranchSequence(previousNodeId, m_currentVisibleBranchIndex);
+}
+
+void MainWindow::rebuildVisibleBranchSequence(int preferredNodeId, int preferredIndex) {
+    m_visibleBranchNodeIds.clear();
+    m_visibleBranchIndexById.clear();
+    m_currentVisibleBranchIndex = -1;
+
+    QVector<QTreeWidgetItem*> stack;
+    for (int i = m_branchTree->topLevelItemCount() - 1; i >= 0; --i) {
+        stack.push_back(m_branchTree->topLevelItem(i));
+    }
+
+    while (!stack.isEmpty()) {
+        QTreeWidgetItem* item = stack.takeLast();
+        if (!item) {
+            continue;
+        }
+
+        bool ok = false;
+        const int nodeId = item->data(0, Qt::UserRole).toInt(&ok);
+        if (ok && nodeId >= 0 && nodeId < m_branchNodes.size()) {
+            m_visibleBranchIndexById.insert(nodeId, m_visibleBranchNodeIds.size());
+            m_visibleBranchNodeIds.push_back(nodeId);
+        }
+
+        for (int i = item->childCount() - 1; i >= 0; --i) {
+            stack.push_back(item->child(i));
+        }
+    }
+
+    if (m_visibleBranchNodeIds.isEmpty()) {
+        updateBranchNavigationButtons();
+        return;
+    }
+
+    int targetIndex = 0;
+    if (preferredNodeId >= 0 && m_visibleBranchIndexById.contains(preferredNodeId)) {
+        targetIndex = m_visibleBranchIndexById.value(preferredNodeId);
+    } else if (preferredIndex >= 0 && preferredIndex < m_visibleBranchNodeIds.size()) {
+        targetIndex = preferredIndex;
+    } else if (m_currentVisibleBranchIndex >= 0 && m_currentVisibleBranchIndex < m_visibleBranchNodeIds.size()) {
+        targetIndex = m_currentVisibleBranchIndex;
+    }
+
+    navigateToVisibleBranchIndex(targetIndex);
+}
+
+void MainWindow::navigateToVisibleBranchIndex(int index) {
+    if (m_visibleBranchNodeIds.isEmpty()) {
+        m_currentVisibleBranchIndex = -1;
+        updateBranchNavigationButtons();
+        return;
+    }
+
+    index = qBound(0, index, m_visibleBranchNodeIds.size() - 1);
+    m_currentVisibleBranchIndex = index;
+    const int nodeId = m_visibleBranchNodeIds[index];
+
+    if (m_branchTreeItemsById.contains(nodeId)) {
+        QTreeWidgetItem* item = m_branchTreeItemsById.value(nodeId);
+        m_branchTree->setCurrentItem(item);
+        m_branchTree->scrollToItem(item);
+    }
+
+    if (nodeId >= 0 && nodeId < m_branchNodes.size()) {
+        renderBranchState(m_branchNodes[nodeId]);
+    }
+    updateBranchNavigationButtons();
+}
+
+void MainWindow::updateBranchNavigationButtons() {
+    const bool hasVisible = !m_visibleBranchNodeIds.isEmpty();
+    if (m_prevVisibleNodeButton) {
+        m_prevVisibleNodeButton->setEnabled(hasVisible && m_currentVisibleBranchIndex > 0);
+    }
+    if (m_nextVisibleNodeButton) {
+        m_nextVisibleNodeButton->setEnabled(hasVisible && m_currentVisibleBranchIndex >= 0
+                                            && m_currentVisibleBranchIndex < m_visibleBranchNodeIds.size() - 1);
+    }
+
+    bool hasNextLeaf = false;
+    if (hasVisible && m_currentVisibleBranchIndex >= 0) {
+        for (int i = m_currentVisibleBranchIndex + 1; i < m_visibleBranchNodeIds.size(); ++i) {
+            const int nodeId = m_visibleBranchNodeIds[i];
+            if (nodeId >= 0 && nodeId < m_branchNodes.size() && m_branchTreeItemsById.contains(nodeId) && m_branchTreeItemsById.value(nodeId)->childCount() == 0) {
+                hasNextLeaf = true;
+                break;
+            }
+        }
+    }
+    if (m_nextVisibleLeafButton) {
+        m_nextVisibleLeafButton->setEnabled(hasNextLeaf);
+    }
 }
 
 void MainWindow::onBranchTreeItemClicked(QTreeWidgetItem* item, int /*column*/) {
@@ -542,14 +662,41 @@ void MainWindow::onBranchTreeItemClicked(QTreeWidgetItem* item, int /*column*/) 
     }
     bool ok = false;
     const int nodeId = item->data(0, Qt::UserRole).toInt(&ok);
-    if (!ok || nodeId < 0 || nodeId >= m_branchNodes.size()) {
+    if (!ok || !m_visibleBranchIndexById.contains(nodeId)) {
         return;
     }
-    renderBranchState(m_branchNodes[nodeId]);
+    navigateToVisibleBranchIndex(m_visibleBranchIndexById.value(nodeId));
 }
 
 void MainWindow::onBranchFilterChanged() {
     rebuildBranchTree();
+}
+
+void MainWindow::onPrevVisibleBranchNode() {
+    if (m_currentVisibleBranchIndex <= 0) {
+        return;
+    }
+    navigateToVisibleBranchIndex(m_currentVisibleBranchIndex - 1);
+}
+
+void MainWindow::onNextVisibleBranchNode() {
+    if (m_currentVisibleBranchIndex < 0 || m_currentVisibleBranchIndex >= m_visibleBranchNodeIds.size() - 1) {
+        return;
+    }
+    navigateToVisibleBranchIndex(m_currentVisibleBranchIndex + 1);
+}
+
+void MainWindow::onNextVisibleLeafNode() {
+    if (m_currentVisibleBranchIndex < 0) {
+        return;
+    }
+    for (int i = m_currentVisibleBranchIndex + 1; i < m_visibleBranchNodeIds.size(); ++i) {
+        const int nodeId = m_visibleBranchNodeIds[i];
+        if (nodeId >= 0 && nodeId < m_branchNodes.size() && m_branchTreeItemsById.contains(nodeId) && m_branchTreeItemsById.value(nodeId)->childCount() == 0) {
+            navigateToVisibleBranchIndex(i);
+            return;
+        }
+    }
 }
 
 bool MainWindow::parseAdjMatrix(const QString& text, AdjMatrixGraph& graph, QString& error) const {
@@ -816,6 +963,11 @@ void MainWindow::onParseAndSolve() {
     m_branchNodes.clear();
     m_branchRootId = -1;
     m_branchTree->clear();
+    m_branchTreeItemsById.clear();
+    m_visibleBranchNodeIds.clear();
+    m_visibleBranchIndexById.clear();
+    m_currentVisibleBranchIndex = -1;
+    updateBranchNavigationButtons();
     m_currentStep = 0;
     m_hasRenderedCurrentStep = false;
     m_currentSolution = 0;
