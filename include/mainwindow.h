@@ -39,7 +39,6 @@ private slots:
 
 private:
     void setupUi();
-    QString mstToString(const MSTSolution& mst) const;
     void drawGraph();
     void renderCurrentStep();
     void resetStepStyle();
@@ -62,7 +61,6 @@ private:
     QPushButton* m_playButton = nullptr;
 
     QTextEdit* m_input = nullptr;
-    QTextEdit* m_output = nullptr;
     QLabel* m_status = nullptr;
     QLabel* m_stepInfo = nullptr;
     QGraphicsScene* m_scene = nullptr;
