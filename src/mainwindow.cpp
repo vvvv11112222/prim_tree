@@ -9,6 +9,7 @@
 #include <QGraphicsSimpleTextItem>
 #include <QGraphicsView>
 #include <QHBoxLayout>
+#include <QHeaderView>
 #include <QHash>
 #include <QLabel>
 #include <QPushButton>
@@ -409,6 +410,7 @@ void MainWindow::setupUi() {
     leftLayout->addWidget(graphView);
 
     auto* right = new QWidget(splitter);
+    right->setMinimumWidth(380);
     auto* rightLayout = new QVBoxLayout(right);
 
     m_prevVisibleNodeButton = new QPushButton("上一个节点", right);
@@ -420,6 +422,11 @@ void MainWindow::setupUi() {
 
     m_branchTree = new QTreeWidget(right);
     m_branchTree->setHeaderLabels({"分支树节点", "代价", "标签"});
+    auto* branchHeader = m_branchTree->header();
+    branchHeader->setSectionResizeMode(0, QHeaderView::Stretch);
+    branchHeader->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    branchHeader->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    branchHeader->setStretchLastSection(false);
     connect(m_branchTree, &QTreeWidget::itemClicked, this, &MainWindow::onBranchTreeItemClicked);
 
     rightLayout->addWidget(new QLabel("分支树", right));
@@ -431,8 +438,9 @@ void MainWindow::setupUi() {
 
     splitter->addWidget(left);
     splitter->addWidget(right);
-    splitter->setStretchFactor(0, 1);
-    splitter->setStretchFactor(1, 1);
+    splitter->setStretchFactor(0, 3);
+    splitter->setStretchFactor(1, 2);
+    splitter->setSizes({700, 480});
 
     root->addWidget(splitter);
     setCentralWidget(central);
