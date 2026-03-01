@@ -411,11 +411,6 @@ void MainWindow::setupUi() {
     auto* right = new QWidget(splitter);
     auto* rightLayout = new QVBoxLayout(right);
 
-    m_filterOptimalOnly = new QCheckBox("仅显示可到达最优解分支", right);
-    m_hidePruned = new QCheckBox("隐藏被剪枝分支", right);
-    connect(m_filterOptimalOnly, &QCheckBox::toggled, this, &MainWindow::onBranchFilterChanged);
-    connect(m_hidePruned, &QCheckBox::toggled, this, &MainWindow::onBranchFilterChanged);
-
     m_prevVisibleNodeButton = new QPushButton("上一个节点", right);
     m_nextVisibleNodeButton = new QPushButton("下一个节点", right);
     m_nextVisibleLeafButton = new QPushButton("下一个叶子", right);
@@ -428,17 +423,11 @@ void MainWindow::setupUi() {
     connect(m_branchTree, &QTreeWidget::itemClicked, this, &MainWindow::onBranchTreeItemClicked);
 
     rightLayout->addWidget(new QLabel("分支树", right));
-    rightLayout->addWidget(m_filterOptimalOnly);
-    rightLayout->addWidget(m_hidePruned);
     rightLayout->addWidget(m_prevVisibleNodeButton);
     rightLayout->addWidget(m_nextVisibleNodeButton);
     rightLayout->addWidget(m_nextVisibleLeafButton);
     rightLayout->addWidget(m_branchTree, 1);
     updateBranchNavigationButtons();
-
-    m_output = new QTextEdit(right);
-    m_output->setReadOnly(true);
-    rightLayout->addWidget(m_output, 1);
 
     splitter->addWidget(left);
     splitter->addWidget(right);
@@ -524,6 +513,7 @@ void MainWindow::rebuildBranchTree() {
     }
 
     QMap<int, QTreeWidgetItem*> itemById;
+    QHash<int, int> visibleAncestorById;
     QVector<int> stack = {m_branchRootId};
     while (!stack.isEmpty()) {
         const int id = stack.takeFirst();
@@ -532,26 +522,28 @@ void MainWindow::rebuildBranchTree() {
         }
 
         const auto& node = m_branchNodes[id];
-        if (m_filterOptimalOnly->isChecked() && !node.reachesOptimalSolution) {
-            continue;
-        }
-        if (m_hidePruned->isChecked() && node.isPruned) {
+        const bool shouldShow = (node.parentId < 0) || (node.viaEdgeId >= 0) || node.isComplete;
+        const int nearestVisibleParent = (node.parentId >= 0) ? visibleAncestorById.value(node.parentId, -1) : -1;
+        visibleAncestorById.insert(node.id, shouldShow ? node.id : nearestVisibleParent);
+        if (!shouldShow) {
             continue;
         }
 
-        QString title = QString("#%1").arg(node.id);
-        if (node.isComplete) {
-            title += " ✅";
-        } else if (node.isPruned) {
-            title += " ✂";
-        } else if (node.isBacktrack) {
-            title += " ↩";
+        QString title;
+        if (!node.vertexSelectionOrder.isEmpty()) {
+            QStringList ids;
+            for (int v : node.vertexSelectionOrder) {
+                ids << QString::number(v);
+            }
+            title = ids.join("→");
+        } else {
+            title = "-";
         }
 
-        auto* item = new QTreeWidgetItem({title, QString::number(node.currentCost), node.label});
+        auto* item = new QTreeWidgetItem({title, QString::number(node.incrementalCost), node.label});
         item->setData(0, Qt::UserRole, node.id);
-        if (node.parentId >= 0 && itemById.contains(node.parentId)) {
-            itemById[node.parentId]->addChild(item);
+        if (nearestVisibleParent >= 0 && itemById.contains(nearestVisibleParent)) {
+            itemById[nearestVisibleParent]->addChild(item);
         } else {
             m_branchTree->addTopLevelItem(item);
         }
@@ -668,9 +660,6 @@ void MainWindow::onBranchTreeItemClicked(QTreeWidgetItem* item, int /*column*/) 
     navigateToVisibleBranchIndex(m_visibleBranchIndexById.value(nodeId));
 }
 
-void MainWindow::onBranchFilterChanged() {
-    rebuildBranchTree();
-}
 
 void MainWindow::onPrevVisibleBranchNode() {
     if (m_currentVisibleBranchIndex <= 0) {
@@ -844,14 +833,6 @@ bool MainWindow::buildGraphFromInput(QString& error) {
     return true;
 }
 
-QString MainWindow::mstToString(const MSTSolution& mst) const {
-    QStringList edgeTexts;
-    for (int id : mst.edgeIds) {
-        edgeTexts << QString::number(id);
-    }
-    return QString("cost=%1, edgeIds=[%2]").arg(mst.totalCost).arg(edgeTexts.join(", "));
-}
-
 void MainWindow::drawGraph() {
     m_scene->clear();
     m_edgeItems.clear();
@@ -958,7 +939,6 @@ void MainWindow::renderCurrentStep() {
 
 void MainWindow::onParseAndSolve() {
     QString error;
-    m_output->clear();
     m_solutions.clear();
     m_branchNodes.clear();
     m_branchRootId = -1;
@@ -1006,26 +986,6 @@ void MainWindow::onParseAndSolve() {
     m_branchNodes = solveResult.branchNodes;
     m_branchRootId = solveResult.branchRootId;
     rebuildBranchTree();
-
-    m_output->append(
-        QString("输入解析成功：顶点=%1, 边=%2, 起点=%3").arg(m_graph->vertexCount()).arg(m_graph->edgeCount()).arg(start));
-    m_output->append(QString("最小生成树数量: %1").arg(m_solutions.size()));
-
-    for (int i = 0; i < m_solutions.size(); ++i) {
-        m_output->append(QString("MST #%1 -> %2").arg(i + 1).arg(mstToString(m_solutions[i])));
-    }
-
-    m_output->append(QString("搜索扩展节点数: %1").arg(solveResult.stats.expandedStates));
-    if (solveResult.stats.isTruncated()) {
-        QStringList reasons;
-        if (solveResult.stats.truncatedBySolutionLimit) {
-            reasons << QString("达到结果数量上限(%1)").arg(limits.maxSolutions);
-        }
-        if (solveResult.stats.truncatedByStateLimit) {
-            reasons << QString("达到搜索节点上限(%1)").arg(limits.maxExpandedStates);
-        }
-        m_output->append(QString("结果已截断：%1。请缩小图规模或提高上限。").arg(reasons.join("，")));
-    }
 
     if (m_solutions.isEmpty()) {
         m_status->setText("未找到 MST（图可能不连通）");

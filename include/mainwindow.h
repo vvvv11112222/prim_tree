@@ -33,14 +33,12 @@ private slots:
     void onNextStep();
     void onToggleAutoPlay();
     void onBranchTreeItemClicked(QTreeWidgetItem* item, int column);
-    void onBranchFilterChanged();
     void onPrevVisibleBranchNode();
     void onNextVisibleBranchNode();
     void onNextVisibleLeafNode();
 
 private:
     void setupUi();
-    QString mstToString(const MSTSolution& mst) const;
     void drawGraph();
     void renderCurrentStep();
     void resetStepStyle();
@@ -63,14 +61,11 @@ private:
     QPushButton* m_playButton = nullptr;
 
     QTextEdit* m_input = nullptr;
-    QTextEdit* m_output = nullptr;
     QLabel* m_status = nullptr;
     QLabel* m_stepInfo = nullptr;
     QGraphicsScene* m_scene = nullptr;
     QTimer* m_timer = nullptr;
     QTreeWidget* m_branchTree = nullptr;
-    QCheckBox* m_filterOptimalOnly = nullptr;
-    QCheckBox* m_hidePruned = nullptr;
     QPushButton* m_prevVisibleNodeButton = nullptr;
     QPushButton* m_nextVisibleNodeButton = nullptr;
     QPushButton* m_nextVisibleLeafButton = nullptr;
