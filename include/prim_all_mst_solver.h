@@ -33,9 +33,11 @@ struct BranchTreeNode {
     int viaEdgeId = -1;
 
     QVector<int> verticesInTree;
+    QVector<int> vertexSelectionOrder;
     QVector<int> selectedEdgeIds;
     QVector<int> candidateEdgeIds;
     int currentCost = 0;
+    int incrementalCost = 0;
 
     bool isBacktrack = false;
     bool isPruned = false;
@@ -77,6 +79,7 @@ public:
 private:
     struct SearchState {
         QSet<int> inTree;
+        QVector<int> vertexSelectionOrder;
         QVector<int> edgeIds;
         int cost = 0;
         QVector<PrimStep> trace;

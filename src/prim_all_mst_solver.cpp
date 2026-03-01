@@ -24,9 +24,11 @@ int appendBranchNode(QVector<BranchTreeNode>& nodes,
                      int depth,
                      int viaEdgeId,
                      const QSet<int>& inTree,
+                     const QVector<int>& vertexSelectionOrder,
                      const QVector<int>& selectedEdgeIds,
                      const QVector<int>& candidateEdgeIds,
                      int currentCost,
+                     int incrementalCost,
                      const QString& label,
                      bool isBacktrack = false,
                      bool isPruned = false,
@@ -37,9 +39,11 @@ int appendBranchNode(QVector<BranchTreeNode>& nodes,
     node.depth = depth;
     node.viaEdgeId = viaEdgeId;
     node.verticesInTree = sortedValues(inTree);
+    node.vertexSelectionOrder = vertexSelectionOrder;
     node.selectedEdgeIds = sortedCopy(selectedEdgeIds);
     node.candidateEdgeIds = sortedCopy(candidateEdgeIds);
     node.currentCost = currentCost;
+    node.incrementalCost = incrementalCost;
     node.isBacktrack = isBacktrack;
     node.isPruned = isPruned;
     node.isComplete = isComplete;
@@ -122,9 +126,11 @@ void PrimAllMSTSolver::dfs(const IGraphStorage& graph,
                                                 state.edgeIds.size() + 1,
                                                 -1,
                                                 state.inTree,
+                                                state.vertexSelectionOrder,
                                                 state.edgeIds,
                                                 {},
                                                 state.cost,
+                                                0,
                                                 QString("✅ 最优解 cost=%1").arg(state.cost),
                                                 false,
                                                 false,
@@ -155,9 +161,11 @@ void PrimAllMSTSolver::dfs(const IGraphStorage& graph,
                                           state.edgeIds.size() + 1,
                                           -1,
                                           state.inTree,
+                                          state.vertexSelectionOrder,
                                           state.edgeIds,
                                           candidateIds,
                                           state.cost,
+                                          0,
                                           QString("展开分支，候选边=%1").arg(candidateIds.size()));
 
     state.trace.push_back({PrimStep::Type::CandidateMinEdges,
@@ -184,6 +192,7 @@ void PrimAllMSTSolver::dfs(const IGraphStorage& graph,
 
         SearchState next = state;
         next.inTree.insert(nextVertex);
+        next.vertexSelectionOrder.push_back(nextVertex);
         next.edgeIds.push_back(edgeId);
         next.cost += e.weight;
 
@@ -192,10 +201,12 @@ void PrimAllMSTSolver::dfs(const IGraphStorage& graph,
                                               next.edgeIds.size() + 1,
                                               edgeId,
                                               next.inTree,
+                                              next.vertexSelectionOrder,
                                               next.edgeIds,
                                               candidateIds,
                                               next.cost,
-                                              QString("选择边 #%1 (%2-%3,w=%4)").arg(edgeId).arg(e.u).arg(e.v).arg(e.weight));
+                                              e.weight,
+                                              QString("选择节点 %1").arg(nextVertex));
 
         next.trace.push_back({PrimStep::Type::ChooseEdge,
                               sortedValues(next.inTree),
@@ -216,9 +227,11 @@ void PrimAllMSTSolver::dfs(const IGraphStorage& graph,
                              next.edgeIds.size() + 2,
                              -1,
                              next.inTree,
+                             next.vertexSelectionOrder,
                              next.edgeIds,
                              {},
                              next.cost,
+                             0,
                              QString("✂ 剪枝：cost=%1 > best=%2").arg(next.cost).arg(bestCost),
                              false,
                              true,
@@ -234,9 +247,11 @@ void PrimAllMSTSolver::dfs(const IGraphStorage& graph,
                          next.edgeIds.size() + 2,
                          -1,
                          next.inTree,
+                         next.vertexSelectionOrder,
                          next.edgeIds,
                          {},
                          next.cost,
+                         0,
                          "↩ 回溯",
                          true,
                          false,
@@ -283,14 +298,17 @@ SolveResult PrimAllMSTSolver::solveAll(const IGraphStorage& graph, int startVert
 
     SearchState init;
     init.inTree.insert(startVertex);
+    init.vertexSelectionOrder.push_back(startVertex);
 
     result.branchRootId = appendBranchNode(result.branchNodes,
                                            -1,
                                            0,
                                            -1,
                                            init.inTree,
+                                           init.vertexSelectionOrder,
                                            {},
                                            {},
+                                           0,
                                            0,
                                            QString("起点=%1").arg(startVertex));
     init.branchNodeId = result.branchRootId;
