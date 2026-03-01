@@ -411,11 +411,6 @@ void MainWindow::setupUi() {
     auto* right = new QWidget(splitter);
     auto* rightLayout = new QVBoxLayout(right);
 
-    m_filterOptimalOnly = new QCheckBox("仅显示可到达最优解分支", right);
-    m_hidePruned = new QCheckBox("隐藏被剪枝分支", right);
-    connect(m_filterOptimalOnly, &QCheckBox::toggled, this, &MainWindow::onBranchFilterChanged);
-    connect(m_hidePruned, &QCheckBox::toggled, this, &MainWindow::onBranchFilterChanged);
-
     m_prevVisibleNodeButton = new QPushButton("上一个节点", right);
     m_nextVisibleNodeButton = new QPushButton("下一个节点", right);
     m_nextVisibleLeafButton = new QPushButton("下一个叶子", right);
@@ -428,8 +423,6 @@ void MainWindow::setupUi() {
     connect(m_branchTree, &QTreeWidget::itemClicked, this, &MainWindow::onBranchTreeItemClicked);
 
     rightLayout->addWidget(new QLabel("分支树", right));
-    rightLayout->addWidget(m_filterOptimalOnly);
-    rightLayout->addWidget(m_hidePruned);
     rightLayout->addWidget(m_prevVisibleNodeButton);
     rightLayout->addWidget(m_nextVisibleNodeButton);
     rightLayout->addWidget(m_nextVisibleLeafButton);
@@ -532,23 +525,18 @@ void MainWindow::rebuildBranchTree() {
         }
 
         const auto& node = m_branchNodes[id];
-        if (m_filterOptimalOnly->isChecked() && !node.reachesOptimalSolution) {
-            continue;
-        }
-        if (m_hidePruned->isChecked() && node.isPruned) {
-            continue;
-        }
-
-        QString title = QString("#%1").arg(node.id);
-        if (node.isComplete) {
-            title += " ✅";
-        } else if (node.isPruned) {
-            title += " ✂";
-        } else if (node.isBacktrack) {
-            title += " ↩";
+        QString title;
+        if (!node.vertexSelectionOrder.isEmpty()) {
+            QStringList ids;
+            for (int v : node.vertexSelectionOrder) {
+                ids << QString::number(v);
+            }
+            title = ids.join("→");
+        } else {
+            title = "-";
         }
 
-        auto* item = new QTreeWidgetItem({title, QString::number(node.currentCost), node.label});
+        auto* item = new QTreeWidgetItem({title, QString::number(node.incrementalCost), node.label});
         item->setData(0, Qt::UserRole, node.id);
         if (node.parentId >= 0 && itemById.contains(node.parentId)) {
             itemById[node.parentId]->addChild(item);
@@ -668,9 +656,6 @@ void MainWindow::onBranchTreeItemClicked(QTreeWidgetItem* item, int /*column*/) 
     navigateToVisibleBranchIndex(m_visibleBranchIndexById.value(nodeId));
 }
 
-void MainWindow::onBranchFilterChanged() {
-    rebuildBranchTree();
-}
 
 void MainWindow::onPrevVisibleBranchNode() {
     if (m_currentVisibleBranchIndex <= 0) {

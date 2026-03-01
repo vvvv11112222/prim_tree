@@ -33,7 +33,6 @@ private slots:
     void onNextStep();
     void onToggleAutoPlay();
     void onBranchTreeItemClicked(QTreeWidgetItem* item, int column);
-    void onBranchFilterChanged();
     void onPrevVisibleBranchNode();
     void onNextVisibleBranchNode();
     void onNextVisibleLeafNode();
@@ -69,8 +68,6 @@ private:
     QGraphicsScene* m_scene = nullptr;
     QTimer* m_timer = nullptr;
     QTreeWidget* m_branchTree = nullptr;
-    QCheckBox* m_filterOptimalOnly = nullptr;
-    QCheckBox* m_hidePruned = nullptr;
     QPushButton* m_prevVisibleNodeButton = nullptr;
     QPushButton* m_nextVisibleNodeButton = nullptr;
     QPushButton* m_nextVisibleLeafButton = nullptr;
