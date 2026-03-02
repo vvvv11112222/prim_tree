@@ -48,7 +48,11 @@ QString defaultListInput() {
            "2 3 5";
 }
 
-bool parseWeightToken(const QString& token, int& value, bool& hasEdge) {
+QString formatWeight(double value) {
+    return QString::number(value, 'g', 12);
+}
+
+bool parseWeightToken(const QString& token, double& value, bool& hasEdge) {
     const QString t = token.trimmed().toUpper();
     if (t == "INF" || t == "X" || t == "-1") {
         hasEdge = false;
@@ -56,7 +60,7 @@ bool parseWeightToken(const QString& token, int& value, bool& hasEdge) {
         return true;
     }
     bool ok = false;
-    const int w = t.toInt(&ok);
+    const double w = t.toDouble(&ok);
     if (!ok) {
         return false;
     }
@@ -93,14 +97,14 @@ QVector<QPointF> buildWeightAwareLayout(const QVector<Edge>& edges, int vertexCo
     constexpr double kAngleWeight = 75.0;
     constexpr double kCrowdWeight = 90.0;
 
-    int minWeight = std::numeric_limits<int>::max();
-    int maxWeight = std::numeric_limits<int>::min();
+    double minWeight = std::numeric_limits<double>::infinity();
+    double maxWeight = -std::numeric_limits<double>::infinity();
     for (const auto& e : edges) {
         minWeight = std::min(minWeight, e.weight);
         maxWeight = std::max(maxWeight, e.weight);
     }
 
-    const auto mapWeightToTargetDistance = [&](int weight) {
+    const auto mapWeightToTargetDistance = [&](double weight) {
         if (minWeight >= maxWeight) {
             return (kMinTargetDistance + kMaxTargetDistance) * 0.5;
         }
@@ -495,8 +499,11 @@ void MainWindow::renderBranchState(const BranchTreeNode& node) {
     if (m_currentVisibleBranchIndex >= 0 && m_currentVisibleBranchIndex < m_visibleBranchNodeIds.size()) {
         visibleInfo = QString("（第 %1 / %2 可见节点）").arg(m_currentVisibleBranchIndex + 1).arg(m_visibleBranchNodeIds.size());
     }
-    m_stepInfo->setText(
-        QString("分支节点 #%1：%2（当前代价=%3）%4").arg(node.id).arg(node.label).arg(node.currentCost).arg(visibleInfo));
+    m_stepInfo->setText(QString("分支节点 #%1：%2（当前代价=%3）%4")
+                            .arg(node.id)
+                            .arg(node.label)
+                            .arg(formatWeight(node.currentCost))
+                            .arg(visibleInfo));
 }
 
 void MainWindow::rebuildBranchTree() {
@@ -548,7 +555,7 @@ void MainWindow::rebuildBranchTree() {
             title = "-";
         }
 
-        auto* item = new QTreeWidgetItem({title, QString::number(node.incrementalCost), node.label});
+        auto* item = new QTreeWidgetItem({title, formatWeight(node.incrementalCost), node.label});
         item->setData(0, Qt::UserRole, node.id);
         if (nearestVisibleParent >= 0 && itemById.contains(nearestVisibleParent)) {
             itemById[nearestVisibleParent]->addChild(item);
@@ -703,22 +710,22 @@ bool MainWindow::parseAdjMatrix(const QString& text, AdjMatrixGraph& graph, QStr
         return false;
     }
 
-    QVector<QVector<int>> matrix;
+    QVector<QVector<double>> matrix;
     for (const auto& rawLine : lines) {
         const QString line = rawLine.trimmed();
         if (line.isEmpty()) {
             continue;
         }
         const QStringList tokens = line.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
-        QVector<int> row;
+        QVector<double> row;
         for (const QString& token : tokens) {
-            int value = -1;
+            double value = -1.0;
             bool hasEdge = false;
             if (!parseWeightToken(token, value, hasEdge)) {
                 error = QString("无法解析矩阵元素: %1").arg(token);
                 return false;
             }
-            row.push_back(hasEdge ? value : -1);
+            row.push_back(hasEdge ? value : -1.0);
         }
         matrix.push_back(row);
     }
@@ -734,9 +741,9 @@ bool MainWindow::parseAdjMatrix(const QString& text, AdjMatrixGraph& graph, QStr
     graph.reset(n);
     for (int i = 0; i < n; ++i) {
         for (int j = i + 1; j < n; ++j) {
-            const int a = matrix[i][j];
-            const int b = matrix[j][i];
-            if (a != b) {
+            const double a = matrix[i][j];
+            const double b = matrix[j][i];
+            if (!qFuzzyCompare(1.0 + a, 1.0 + b)) {
                 error = QString("矩阵不是对称矩阵: (%1,%2) 与 (%2,%1) 不一致").arg(i).arg(j);
                 return false;
             }
@@ -758,12 +765,12 @@ bool MainWindow::parseAdjList(const QString& text, AdjListGraph& graph, QString&
     struct Row {
         int u;
         int v;
-        int w;
+        double w;
         QString rawLine;
     };
 
     struct SeenEdgeInfo {
-        int weight;
+        double weight;
         QString rawLine;
     };
 
@@ -787,7 +794,7 @@ bool MainWindow::parseAdjList(const QString& text, AdjListGraph& graph, QString&
         bool okW = false;
         const int u = tokens[0].toInt(&okU);
         const int v = tokens[1].toInt(&okV);
-        const int w = tokens[2].toInt(&okW);
+        const double w = tokens[2].toDouble(&okW);
         if (!okU || !okV || !okW || u < 0 || v < 0 || w <= 0) {
             error = QString("邻接表含非法值，错误行: %1").arg(line);
             return false;
@@ -797,7 +804,7 @@ bool MainWindow::parseAdjList(const QString& text, AdjListGraph& graph, QString&
         const quint64 edgeKey = (static_cast<quint64>(a) << 32) | static_cast<quint32>(b);
         const auto existing = seenEdges.constFind(edgeKey);
         if (existing != seenEdges.constEnd()) {
-            if (existing->weight != w) {
+            if (!qFuzzyCompare(1.0 + existing->weight, 1.0 + w)) {
                 error = QString("检测到重复边且权重冲突，已有行: %1；冲突行: %2")
                             .arg(existing->rawLine, line);
                 return false;
@@ -862,7 +869,7 @@ void MainWindow::drawGraph() {
         m_edgeItems.insert(e.id, line);
 
         const QPointF mid = (a + b) / 2.0;
-        auto* txt = m_scene->addSimpleText(QString::number(e.weight));
+        auto* txt = m_scene->addSimpleText(formatWeight(e.weight));
         txt->setBrush(QBrush(Qt::darkBlue));
         txt->setPos(mid.x() + 3, mid.y() + 3);
     }
@@ -942,7 +949,11 @@ void MainWindow::renderCurrentStep() {
     }
 
     m_stepInfo->setText(
-        QString("步骤 %1/%2：%3（当前代价=%4）").arg(m_currentStep + 1).arg(trace.size()).arg(step.note).arg(step.currentCost));
+        QString("步骤 %1/%2：%3（当前代价=%4）")
+            .arg(m_currentStep + 1)
+            .arg(trace.size())
+            .arg(step.note)
+            .arg(formatWeight(step.currentCost)));
 }
 
 void MainWindow::onParseAndSolve() {
