@@ -41,11 +41,10 @@ QString defaultMatrixInput() {
 }
 
 QString defaultListInput() {
-    return "0 1 2\n"
-           "0 2 3\n"
-           "1 2 1\n"
-           "1 3 4\n"
-           "2 3 5";
+    return "0 1 2 2 3\n"
+           "1 2 1 3 4\n"
+           "2 3 5\n"
+           "3";
 }
 
 QString formatWeight(double value) {
@@ -762,19 +761,11 @@ bool MainWindow::parseAdjList(const QString& text, AdjListGraph& graph, QString&
         return false;
     }
 
-    struct Row {
-        int u;
-        int v;
-        double w;
-        QString rawLine;
-    };
-
     struct SeenEdgeInfo {
         double weight;
         QString rawLine;
     };
 
-    QVector<Row> rows;
     QHash<quint64, SeenEdgeInfo> seenEdges;
     int maxV = -1;
 
@@ -784,49 +775,57 @@ bool MainWindow::parseAdjList(const QString& text, AdjListGraph& graph, QString&
             continue;
         }
         const QStringList tokens = line.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
-        if (tokens.size() != 3) {
-            error = QString("邻接表每行应为: u v w，错误行: %1").arg(line);
+        if (tokens.size() < 1 || (tokens.size() - 1) % 2 != 0) {
+            error = QString("邻接表每行应为: u (v w)...，错误行: %1").arg(line);
             return false;
         }
 
         bool okU = false;
-        bool okV = false;
-        bool okW = false;
         const int u = tokens[0].toInt(&okU);
-        const int v = tokens[1].toInt(&okV);
-        const double w = tokens[2].toDouble(&okW);
-        if (!okU || !okV || !okW || u < 0 || v < 0 || w <= 0) {
+        if (!okU || u < 0) {
             error = QString("邻接表含非法值，错误行: %1").arg(line);
             return false;
         }
-        const int a = qMin(u, v);
-        const int b = qMax(u, v);
-        const quint64 edgeKey = (static_cast<quint64>(a) << 32) | static_cast<quint32>(b);
-        const auto existing = seenEdges.constFind(edgeKey);
-        if (existing != seenEdges.constEnd()) {
-            if (!qFuzzyCompare(1.0 + existing->weight, 1.0 + w)) {
-                error = QString("检测到重复边且权重冲突，已有行: %1；冲突行: %2")
-                            .arg(existing->rawLine, line);
+
+        maxV = qMax(maxV, u);
+        for (int i = 1; i < tokens.size(); i += 2) {
+            bool okV = false;
+            bool okW = false;
+            const int v = tokens[i].toInt(&okV);
+            const double w = tokens[i + 1].toDouble(&okW);
+            if (!okV || !okW || v < 0 || w <= 0 || u == v) {
+                error = QString("邻接表含非法值，错误行: %1").arg(line);
                 return false;
             }
-            error = QString("检测到重复边，请删除重复定义。已有行: %1；重复行: %2")
-                        .arg(existing->rawLine, line);
-            return false;
-        }
 
-        seenEdges.insert(edgeKey, {w, line});
-        rows.push_back({u, v, w, line});
-        maxV = qMax(maxV, qMax(u, v));
+            const int a = qMin(u, v);
+            const int b = qMax(u, v);
+            const quint64 edgeKey = (static_cast<quint64>(a) << 32) | static_cast<quint32>(b);
+            const auto existing = seenEdges.constFind(edgeKey);
+            if (existing != seenEdges.constEnd()) {
+                if (!qFuzzyCompare(1.0 + existing->weight, 1.0 + w)) {
+                    error = QString("检测到重复边且权重冲突，已有行: %1；冲突行: %2")
+                                .arg(existing->rawLine, line);
+                    return false;
+                }
+                continue;
+            }
+
+            seenEdges.insert(edgeKey, {w, line});
+            maxV = qMax(maxV, v);
+        }
     }
 
-    if (maxV < 0) {
+    if (maxV < 0 || seenEdges.isEmpty()) {
         error = "邻接表未解析出有效边";
         return false;
     }
 
     graph.reset(maxV + 1);
-    for (const auto& row : rows) {
-        graph.addEdge(row.u, row.v, row.w);
+    for (auto it = seenEdges.cbegin(); it != seenEdges.cend(); ++it) {
+        const int u = static_cast<int>(it.key() >> 32);
+        const int v = static_cast<int>(it.key() & 0xFFFFFFFFu);
+        graph.addEdge(u, v, it.value().weight);
     }
     return true;
 }
