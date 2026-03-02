@@ -4,7 +4,8 @@
 #include <QStringList>
 
 #include <algorithm>
-#include <climits>
+#include <cmath>
+#include <limits>
 
 namespace {
 QVector<int> sortedValues(const QSet<int>& values) {
@@ -19,6 +20,20 @@ QVector<int> sortedCopy(const QVector<int>& values) {
     return out;
 }
 
+constexpr double kEps = 1e-9;
+
+bool almostEqual(double a, double b) {
+    return std::abs(a - b) <= kEps;
+}
+
+bool strictlyLess(double a, double b) {
+    return (b - a) > kEps;
+}
+
+QString formatWeight(double value) {
+    return QString::number(value, 'g', 12);
+}
+
 int appendBranchNode(QVector<BranchTreeNode>& nodes,
                      int parentId,
                      int depth,
@@ -27,8 +42,8 @@ int appendBranchNode(QVector<BranchTreeNode>& nodes,
                      const QVector<int>& vertexSelectionOrder,
                      const QVector<int>& selectedEdgeIds,
                      const QVector<int>& candidateEdgeIds,
-                     int currentCost,
-                     int incrementalCost,
+                     double currentCost,
+                     double incrementalCost,
                      const QString& label,
                      bool isBacktrack = false,
                      bool isPruned = false,
@@ -64,7 +79,7 @@ void markOptimalPath(QVector<BranchTreeNode>& branchNodes, const QVector<int>& b
 
 QVector<int> PrimAllMSTSolver::minCutEdges(const IGraphStorage& graph, const QSet<int>& inTree) const {
     QVector<int> cut;
-    int minWeight = INT_MAX;
+    double minWeight = std::numeric_limits<double>::infinity();
 
     for (const auto& e : graph.edges()) {
         const bool a = inTree.contains(e.u);
@@ -72,10 +87,10 @@ QVector<int> PrimAllMSTSolver::minCutEdges(const IGraphStorage& graph, const QSe
         if (a == b) {
             continue;
         }
-        if (e.weight < minWeight) {
+        if (strictlyLess(e.weight, minWeight)) {
             minWeight = e.weight;
             cut = {e.id};
-        } else if (e.weight == minWeight) {
+        } else if (almostEqual(e.weight, minWeight)) {
             cut.push_back(e.id);
         }
     }
@@ -93,7 +108,7 @@ QString PrimAllMSTSolver::edgeSetKey(const QVector<int>& edgeIds) const {
 }
 
 void PrimAllMSTSolver::dfs(const IGraphStorage& graph,
-                           int bestCost,
+                           double bestCost,
                            SearchState state,
                            QVector<MSTSolution>& out,
                            QSet<QString>& dedup,
@@ -112,7 +127,7 @@ void PrimAllMSTSolver::dfs(const IGraphStorage& graph,
 
     ++stats.expandedStates;
     if (state.edgeIds.size() == graph.vertexCount() - 1) {
-        if (state.cost != bestCost) {
+        if (!almostEqual(state.cost, bestCost)) {
             return;
         }
         const QString key = edgeSetKey(state.edgeIds);
@@ -131,7 +146,7 @@ void PrimAllMSTSolver::dfs(const IGraphStorage& graph,
                                                 {},
                                                 state.cost,
                                                 0,
-                                                QString("✅ 最优解 cost=%1").arg(state.cost),
+                                                QString("✅ 最优解 cost=%1").arg(formatWeight(state.cost)),
                                                 false,
                                                 false,
                                                 true);
@@ -213,7 +228,7 @@ void PrimAllMSTSolver::dfs(const IGraphStorage& graph,
                               sortedCopy(candidateIds),
                               edgeId,
                               next.cost,
-                              QString("选择边(%1,%2,w=%3)").arg(e.u).arg(e.v).arg(e.weight),
+                              QString("选择边(%1,%2,w=%3)").arg(e.u).arg(e.v).arg(formatWeight(e.weight)),
                               chooseId,
                               state.branchNodeId,
                               edgeId});
@@ -221,7 +236,7 @@ void PrimAllMSTSolver::dfs(const IGraphStorage& graph,
         next.branchNodeId = chooseId;
         branchPath.push_back(chooseId);
 
-        if (next.cost > bestCost) {
+        if (strictlyLess(bestCost, next.cost)) {
             appendBranchNode(branchNodes,
                              next.branchNodeId,
                              next.edgeIds.size() + 2,
@@ -232,7 +247,7 @@ void PrimAllMSTSolver::dfs(const IGraphStorage& graph,
                              {},
                              next.cost,
                              0,
-                             QString("✂ 剪枝：cost=%1 > best=%2").arg(next.cost).arg(bestCost),
+                             QString("✂ 剪枝：cost=%1 > best=%2").arg(formatWeight(next.cost)).arg(formatWeight(bestCost)),
                              false,
                              true,
                              false);
@@ -270,10 +285,10 @@ SolveResult PrimAllMSTSolver::solveAll(const IGraphStorage& graph, int startVert
     }
 
     QSet<int> inTree = {startVertex};
-    int bestCost = 0;
+    double bestCost = 0.0;
 
     while (inTree.size() < graph.vertexCount()) {
-        int pickWeight = INT_MAX;
+        double pickWeight = std::numeric_limits<double>::infinity();
         int pickU = -1;
         int pickV = -1;
         for (const auto& e : graph.edges()) {
@@ -282,13 +297,13 @@ SolveResult PrimAllMSTSolver::solveAll(const IGraphStorage& graph, int startVert
             if (a == b) {
                 continue;
             }
-            if (e.weight < pickWeight) {
+            if (strictlyLess(e.weight, pickWeight)) {
                 pickWeight = e.weight;
                 pickU = e.u;
                 pickV = e.v;
             }
         }
-        if (pickWeight == INT_MAX) {
+        if (!std::isfinite(pickWeight)) {
             return result;
         }
         bestCost += pickWeight;

@@ -18,7 +18,7 @@ struct PrimStep {
     QVector<int> verticesInTree;
     QVector<int> relatedEdgeIds;
     int chosenEdgeId = -1;
-    int currentCost = 0;
+    double currentCost = 0.0;
     QString note;
 
     int branchNodeId = -1;
@@ -36,8 +36,8 @@ struct BranchTreeNode {
     QVector<int> vertexSelectionOrder;
     QVector<int> selectedEdgeIds;
     QVector<int> candidateEdgeIds;
-    int currentCost = 0;
-    int incrementalCost = 0;
+    double currentCost = 0.0;
+    double incrementalCost = 0.0;
 
     bool isBacktrack = false;
     bool isPruned = false;
@@ -48,7 +48,7 @@ struct BranchTreeNode {
 
 struct MSTSolution {
     QVector<int> edgeIds;
-    int totalCost = 0;
+    double totalCost = 0.0;
     QVector<PrimStep> trace;
 };
 
@@ -81,7 +81,7 @@ private:
         QSet<int> inTree;
         QVector<int> vertexSelectionOrder;
         QVector<int> edgeIds;
-        int cost = 0;
+        double cost = 0.0;
         QVector<PrimStep> trace;
 
         int branchNodeId = -1;
@@ -90,7 +90,7 @@ private:
     QVector<int> minCutEdges(const IGraphStorage& graph, const QSet<int>& inTree) const;
     QString edgeSetKey(const QVector<int>& edgeIds) const;
     void dfs(const IGraphStorage& graph,
-             int bestCost,
+             double bestCost,
              SearchState state,
              QVector<MSTSolution>& out,
              QSet<QString>& dedup,

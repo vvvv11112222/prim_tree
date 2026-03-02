@@ -3,7 +3,7 @@
 #include <QSet>
 
 namespace {
-constexpr int kNoEdge = -1;
+constexpr double kNoEdge = -1.0;
 }
 
 AdjMatrixGraph::AdjMatrixGraph(int n) {
@@ -12,12 +12,12 @@ AdjMatrixGraph::AdjMatrixGraph(int n) {
 
 void AdjMatrixGraph::reset(int n) {
     m_n = n;
-    m_weight = QVector<QVector<int>>(n, QVector<int>(n, kNoEdge));
+    m_weight = QVector<QVector<double>>(n, QVector<double>(n, kNoEdge));
     m_edgeId = QVector<QVector<int>>(n, QVector<int>(n, kNoEdge));
     m_edges.clear();
 }
 
-void AdjMatrixGraph::addEdge(int u, int v, int w) {
+void AdjMatrixGraph::addEdge(int u, int v, double w) {
     if (u == v || u < 0 || v < 0 || u >= m_n || v >= m_n || m_weight[u][v] != kNoEdge) {
         return;
     }
@@ -44,7 +44,7 @@ QVector<int> AdjMatrixGraph::neighbors(int vertex) const {
 }
 
 int AdjMatrixGraph::edgeId(int u, int v) const { return m_edgeId[u][v]; }
-int AdjMatrixGraph::edgeWeight(int u, int v) const { return m_weight[u][v]; }
+double AdjMatrixGraph::edgeWeight(int u, int v) const { return m_weight[u][v]; }
 
 AdjListGraph::AdjListGraph(int n) {
     reset(n);
@@ -56,7 +56,7 @@ void AdjListGraph::reset(int n) {
     m_edges.clear();
 }
 
-void AdjListGraph::addEdge(int u, int v, int w) {
+void AdjListGraph::addEdge(int u, int v, double w) {
     if (u == v || u < 0 || v < 0 || u >= m_n || v >= m_n || edgeId(u, v) != kNoEdge) {
         return;
     }
@@ -87,7 +87,7 @@ int AdjListGraph::edgeId(int u, int v) const {
     return kNoEdge;
 }
 
-int AdjListGraph::edgeWeight(int u, int v) const {
+double AdjListGraph::edgeWeight(int u, int v) const {
     for (const auto& to : m_adj[u]) {
         if (to.v == v) {
             return to.w;
